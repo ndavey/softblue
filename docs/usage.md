@@ -1,0 +1,77 @@
+# SoftBlue Usage
+
+## Configuration precedence
+
+Settings resolve as: **command-line flags > config file > built-in defaults**.
+
+`~/.softblue/config.yaml` (override the base dir with `$SOFTBLUE_HOME`):
+
+```yaml
+audio:
+  default_device: null     # null = system default
+  sample_rate: 8000
+  amplitude: 0.7
+generation:
+  seize_duration: 2.0
+  wink_delay: 0.5
+  digit_duration: 0.06
+  inter_digit_gap: 0.1
+  kp_duration: 0.1
+  st_duration: 0.1
+ui:
+  theme: phreakme
+  tui_refresh_rate: 30
+  web_port: 8080
+  web_host: 127.0.0.1
+presets:
+  default_directory: ~/.softblue/presets
+logging:
+  level: info
+```
+
+## CLI
+
+```bash
+softblue generate <digits> -o out.wav [--seize-only] [timing flags]
+softblue play <digits> [--loop N] [--countdown N] [--device DEV]
+softblue verify <file.wav>
+softblue devices
+softblue preset save <name> --digits 1234 --seize 2.5
+softblue preset load <name> --play
+softblue preset list | delete <name>
+```
+
+Digit strings accept `0-9` plus `-` and spaces as visual separators
+(e.g. `555-1234`). Any other character is rejected with a clear message.
+
+## Web API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET  | `/api/health` | status + audio backend |
+| POST | `/api/generate` | `{digits, config}` → base64 WAV + duration |
+| POST | `/api/play` | play on server device (409 if busy) |
+| POST | `/api/verify` | per-100ms detected frequencies |
+| GET  | `/api/devices` | output devices |
+| GET/POST/DELETE | `/api/presets[/{name}]` | preset CRUD (name-sanitised) |
+| WS   | `/ws/audio` | streams int16 LE PCM chunks |
+
+The browser plays audio by decoding the `/api/generate` WAV through a shared
+`AnalyserNode`, which drives the live spectrum display.
+
+## MF reference
+
+| Digit | f1 | f2 | | Special | f1 | f2 |
+|-------|----|----|-|---------|----|----|
+| 1 | 700 | 900 | | KP | 1100 | 1700 |
+| 2 | 700 | 1100 | | ST | 1500 | 1700 |
+| 3 | 900 | 1100 | | ST2 | 900 | 1700 |
+| 4 | 700 | 1300 | | ST3 | 1300 | 1700 |
+| 5 | 900 | 1300 | | Seize | 2600 | — |
+| 6 | 1100 | 1300 |
+| 7 | 700 | 1500 |
+| 8 | 900 | 1500 |
+| 9 | 1100 | 1500 |
+| 0 | 1300 | 1500 |
+
+All tones stay below the 4 kHz Nyquist limit at the default 8 kHz rate.

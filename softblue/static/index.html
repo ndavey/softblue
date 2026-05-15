@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SoftBlue Web</title>
+<link rel="icon" href="favicon.ico">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="logo">&#128311; SoftBlue Web</span>
+  <span id="status" class="badge">connecting&hellip;</span>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Sequence Builder</h2>
+    <label>Digits to dial
+      <input id="digits" value="8675309" autocomplete="off">
+    </label>
+
+    <div class="keypad">
+      <button data-digit="1">1</button><button data-digit="2">2</button><button data-digit="3">3</button>
+      <button data-digit="4">4</button><button data-digit="5">5</button><button data-digit="6">6</button>
+      <button data-digit="7">7</button><button data-digit="8">8</button><button data-digit="9">9</button>
+      <button data-act="clear">C</button><button data-digit="0">0</button>
+      <button data-act="back">&larr;</button>
+      <button data-tone="seize" class="seize-btn">SEIZE</button>
+    </div>
+
+    <div class="grid">
+      <fieldset><legend>Timing (s)</legend>
+        <label>Seize <input id="seize_duration" type="number" step="0.1" value="2.0"></label>
+        <label>Wink <input id="wink_delay" type="number" step="0.1" value="0.5"></label>
+        <label>Digit <input id="digit_duration" type="number" step="0.01" value="0.06"></label>
+        <label>Gap <input id="inter_digit_gap" type="number" step="0.01" value="0.1"></label>
+        <label class="check"><input id="seize_only" type="checkbox"> Seize only</label>
+      </fieldset>
+      <fieldset><legend>Tone</legend>
+        <label>Amplitude <input id="amplitude" type="number" step="0.05" min="0" max="1" value="0.7"></label>
+        <label>Sample rate <input id="sample_rate" type="number" step="1000" value="8000"></label>
+        <label class="check"><input id="liveMode" type="checkbox"> Live playback</label>
+      </fieldset>
+    </div>
+
+    <div class="actions">
+      <button id="play" class="primary">&#128308; Generate &amp; Play</button>
+      <button id="download">&#128190; Download WAV</button>
+      <button id="savePreset">Save Preset</button>
+    </div>
+    <p id="error" class="error"></p>
+  </section>
+
+  <section class="card">
+    <h2>Timeline</h2>
+    <canvas id="timeline" height="60"></canvas>
+    <h2>Spectrum Analyzer</h2>
+    <canvas id="spectrum" height="160"></canvas>
+  </section>
+
+  <section class="card split">
+    <div>
+      <h2>Presets</h2>
+      <ul id="presets" class="list"></ul>
+    </div>
+    <div>
+      <h2>Device</h2>
+      <div id="devices" class="muted">&hellip;</div>
+      <button id="serverPlay">Play on server</button>
+    </div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

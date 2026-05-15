@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "softblue-web",
+      "runtimeExecutable": "/Users/ndavey/github/softblue/.venv/bin/python",
+      "runtimeArgs": ["-m", "softblue", "web", "--port", "8765"],
+      "port": 8765
+    }
+  ]
+}
