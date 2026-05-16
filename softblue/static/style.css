@@ -85,6 +85,32 @@ canvas { width: 100%; display: block; background: var(--bg-primary); border-radi
 .list li:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
 .muted { color: var(--text-secondary); font-size: .8rem; margin-bottom: 10px; }
 .error { color: var(--danger); font-size: .85rem; min-height: 1.2em; }
+/* ---- coin tones -------------------------------------------------------- */
+.coin-panel {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 14px;
+}
+.coin-group h3 {
+  font-size: .85rem; margin: 0 0 10px; color: var(--accent-cyan);
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.coin-group h3 .muted { text-transform: none; letter-spacing: 0; }
+.coin-btns {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.coin-btns button {
+  flex: 1; min-width: 56px; padding: 10px 6px; text-align: center;
+  background: var(--bg-primary); color: var(--text-primary);
+  border: 1px solid #2a3866; border-radius: 6px; cursor: pointer;
+  font-family: inherit; font-size: .85rem; line-height: 1.4;
+  transition: all .1s;
+}
+.coin-btns button span { font-size: .7rem; color: var(--text-secondary); }
+.coin-btns button:hover { border-color: #ffaa00; color: #ffaa00; }
+.coin-btns button:hover span { color: #ffaa00; }
+.coin-btns button:active { background: #1a1400; }
+.coin-btns button.selected { border-color: #ffaa00; color: #ffaa00; background: #1a1400; }
+.coin-actions { display: flex; align-items: center; gap: 12px; }
+
 @media (max-width: 700px) {
-  .card.split, .grid { grid-template-columns: 1fr; }
+  .card.split, .grid, .coin-panel { grid-template-columns: 1fr; }
 }

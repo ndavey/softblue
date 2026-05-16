@@ -97,6 +97,108 @@ async function renderToWav(digits, cfg) {
   return _encodeWav(buffer.getChannelData(0), sr);
 }
 
+// ---- Coin tones ----------------------------------------------------------
+
+// 1-slot ACTS red-box specs (Bell System, confirmed):
+// All denominations: 1700 Hz + 2200 Hz dual tone.
+// Denomination encoded by number and duration of bursts.
+const COIN_FREQS_1SLOT = [1700, 2200];
+const COIN_1SLOT = {
+  nickel:  { pulses: 1, on: 0.066, off: 0.066 },
+  dime:    { pulses: 2, on: 0.066, off: 0.066 },
+  quarter: { pulses: 5, on: 0.033, off: 0.033 },
+  dollar:  { pulses: 1, on: 0.650, off: 0     },
+};
+
+// 3-slot mechanical bell tones (synthesized approximation).
+// Real phones use physical bells struck by coins — these are the operator-
+// heard sounds, not electronic signals. Frequencies vary by phone model;
+// values here are common approximations used in emulation.
+const COIN_3SLOT = {
+  nickel:  { freq: 1664, pulses: 1, bellDur: 0.35, gap: 0 },
+  dime:    { freq: 1664, pulses: 2, bellDur: 0.35, gap: 0.2 },
+  quarter: { freq: 800,  pulses: 1, bellDur: 0.70, gap: 0 },  // lower gong
+};
+
+// Schedule one exponentially-decaying bell strike (mimics physical ding).
+function _scheduleBell(ctx, dest, freq, at, dur, amplitude) {
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(amplitude, at + 0.002);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  gain.connect(dest);
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  osc.connect(gain);
+  osc.start(at);
+  osc.stop(at + dur);
+}
+
+// Play coin tone live. slot = "1slot" | "3slot".
+// denomination = "nickel" | "dime" | "quarter" | "dollar" (dollar: 1-slot only).
+// Returns total duration in seconds.
+function playCoinLive(ctx, dest, denomination, slot, amplitude) {
+  const base = ctx.currentTime + 0.05;
+  amplitude = amplitude || 0.7;
+  if (slot === "1slot") {
+    const spec = COIN_1SLOT[denomination];
+    if (!spec) throw new Error("Unknown denomination: " + denomination);
+    let t = 0;
+    for (let i = 0; i < spec.pulses; i++) {
+      _scheduleEvent(ctx, dest, COIN_FREQS_1SLOT, base + t, spec.on, amplitude);
+      t += spec.on + spec.off;
+    }
+    return t;
+  } else {
+    const spec = COIN_3SLOT[denomination];
+    if (!spec) throw new Error("Unknown denomination: " + denomination);
+    let t = 0;
+    for (let i = 0; i < spec.pulses; i++) {
+      _scheduleBell(ctx, dest, spec.freq, base + t, spec.bellDur, amplitude);
+      t += spec.bellDur + spec.gap;
+    }
+    return t;
+  }
+}
+
+// Render coin tone to WAV bytes.
+async function renderCoinToWav(denomination, slot, amplitude, sampleRate) {
+  const sr = sampleRate || 8000;
+  amplitude = amplitude || 0.7;
+  let totalDur = 0;
+  const scheduleItems = []; // collect what to render
+
+  if (slot === "1slot") {
+    const spec = COIN_1SLOT[denomination];
+    let t = 0;
+    for (let i = 0; i < spec.pulses; i++) {
+      scheduleItems.push({ type: "tone", freqs: COIN_FREQS_1SLOT, at: t, dur: spec.on });
+      t += spec.on + spec.off;
+    }
+    totalDur = t;
+  } else {
+    const spec = COIN_3SLOT[denomination];
+    let t = 0;
+    for (let i = 0; i < spec.pulses; i++) {
+      scheduleItems.push({ type: "bell", freq: spec.freq, at: t, dur: spec.bellDur });
+      t += spec.bellDur + spec.gap;
+    }
+    totalDur = t;
+  }
+
+  const nFrames = Math.ceil(totalDur * sr) + sr;
+  const offline = new OfflineAudioContext(1, nFrames, sr);
+  for (const item of scheduleItems) {
+    if (item.type === "tone") {
+      _scheduleEvent(offline, offline.destination, item.freqs, item.at, item.dur, amplitude);
+    } else {
+      _scheduleBell(offline, offline.destination, item.freq, item.at, item.dur, amplitude);
+    }
+  }
+  const buffer = await offline.startRendering();
+  return _encodeWav(buffer.getChannelData(0), sr);
+}
+
 function _encodeWav(pcm, sr) {
   const int16 = new Int16Array(pcm.length);
   for (let i = 0; i < pcm.length; i++) {

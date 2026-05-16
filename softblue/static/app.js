@@ -224,6 +224,55 @@ async function loadDevices() {
   }
 }
 
+// ---- coin tones ----------------------------------------------------------
+
+let selectedCoin = null; // { denomination, slot }
+
+function playCoin(denomination, slot) {
+  kickAudio();
+  try {
+    const dur = playCoinLive(audioCtx, analyser, denomination, slot,
+                             parseFloat($("amplitude").value));
+    animateTimeline(dur);
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+async function downloadCoin() {
+  if (!selectedCoin) { showError("Select a coin first."); return; }
+  showError("");
+  try {
+    const buf = await renderCoinToWav(
+      selectedCoin.denomination, selectedCoin.slot,
+      parseFloat($("amplitude").value),
+      parseInt($("sample_rate").value)
+    );
+    const blob = new Blob([buf], { type: "audio/wav" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${selectedCoin.slot}_${selectedCoin.denomination}.wav`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) { showError(e.message); }
+}
+
+document.querySelectorAll(".coin-btns button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const { coin, slot } = btn.dataset;
+    // Highlight selection
+    document.querySelectorAll(".coin-btns button").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+    selectedCoin = { denomination: coin, slot };
+    $("coinSelected").textContent = `${slot === "1slot" ? "1-slot" : "3-slot"} · ${coin}`;
+    // Always play on click
+    kickAudio();
+    playCoin(coin, slot);
+  });
+});
+
+$("coinDownload").onclick = downloadCoin;
+
 // ---- service worker registration -----------------------------------------
 
 if ("serviceWorker" in navigator) {
