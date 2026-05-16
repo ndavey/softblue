@@ -3,9 +3,10 @@
 const $ = (id) => document.getElementById(id);
 const TIMING = ["seize_duration", "wink_delay", "digit_duration",
                 "inter_digit_gap", "amplitude", "sample_rate"];
+const PRESETS_KEY = "softblue-presets";
 
-let livePlaybackTimeout;
-const LIVE_DEBOUNCE_MS = 300;
+let liveDebounce;
+const LIVE_MS = 300;
 
 function readConfig() {
   const c = {};
@@ -22,13 +23,6 @@ function setStatus(text, cls) {
 
 function showError(msg) { $("error").textContent = msg || ""; }
 
-function b64ToBuffer(b64) {
-  const bin = atob(b64);
-  const buf = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-  return buf.buffer;
-}
-
 // ---- audio graph ---------------------------------------------------------
 let audioCtx, analyser;
 
@@ -42,90 +36,56 @@ function ensureAudio() {
   }
 }
 
-// Must be called synchronously inside a user-gesture handler (before any
-// await) so the browser allows resume(). After an await the gesture is gone.
+// Call synchronously inside a user-gesture handler (before any await).
 function kickAudio() {
   ensureAudio();
-  audioCtx.resume(); // fire-and-forget; already running = no-op
+  audioCtx.resume();
 }
 
-// ---- API -----------------------------------------------------------------
-async function fetchGenerate(digits, configOverride) {
-  const cfg = Object.assign(readConfig(), configOverride || {});
-  const res = await fetch("/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ digits: digits !== undefined ? digits : $("digits").value, config: cfg }),
-  });
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(e.detail || "generation failed");
-  }
-  return res.json();
-}
+// ---- playback (all client-side, no server needed) ------------------------
 
-async function decodeAndPlay(data) {
-  const audioBuffer = await audioCtx.decodeAudioData(b64ToBuffer(data.audio));
-  const src = audioCtx.createBufferSource();
-  src.buffer = audioBuffer;
-  src.connect(analyser);
-  src.start();
-  if (data.duration) animateTimeline(data.duration);
-}
-
-// ---- play modes ----------------------------------------------------------
-
-// Full sequence from the digits input — called by the Generate & Play button.
-async function playLocal() {
+function playLocal() {
   showError("");
-  kickAudio(); // MUST be before any await
+  kickAudio();
   try {
-    const data = await fetchGenerate();
-    await decodeAndPlay(data);
+    validateDigits($("digits").value);
+    const dur = playSequenceLive(audioCtx, analyser, $("digits").value, readConfig());
+    animateTimeline(dur);
   } catch (e) {
     showError(e.message);
   }
 }
 
-// Single-digit live tone — short KP+digit+ST burst, no seize/wink.
-async function playDigitTone(digit) {
-  try {
-    const data = await fetchGenerate(digit, {
-      seize_duration: 0, wink_delay: 0,
-      kp_duration: 0.05, inter_digit_gap: 0.02,
-      digit_duration: 0.1, st_duration: 0.05,
-      seize_only: false,
-    });
-    await decodeAndPlay(data);
-  } catch (e) {
-    console.error("Tone play error:", e);
-  }
+function playDigitTone(digit) {
+  const cfg = Object.assign(readConfig(), {
+    seize_duration: 0, wink_delay: 0,
+    kp_duration: 0.05, inter_digit_gap: 0.02,
+    digit_duration: 0.1, st_duration: 0.05,
+    seize_only: false,
+  });
+  playSequenceLive(audioCtx, analyser, digit, cfg);
 }
 
-// Seize-only tone — uses current seize_duration from inputs.
-async function playSeizeTone() {
-  try {
-    const data = await fetchGenerate("", { seize_only: true });
-    await decodeAndPlay(data);
-  } catch (e) {
-    console.error("Seize play error:", e);
-  }
+function playSeizeTone() {
+  const cfg = Object.assign(readConfig(), { seize_only: true });
+  playSequenceLive(audioCtx, analyser, "", cfg);
 }
 
-// Debounced full-sequence replay triggered by input changes.
 function playLiveDebounced() {
   if (!$("liveMode").checked) return;
-  kickAudio(); // while still inside the change-event user gesture
-  clearTimeout(livePlaybackTimeout);
-  livePlaybackTimeout = setTimeout(() => playLocal(), LIVE_DEBOUNCE_MS);
+  kickAudio();
+  clearTimeout(liveDebounce);
+  liveDebounce = setTimeout(() => playLocal(), LIVE_MS);
 }
 
-// ---- download ------------------------------------------------------------
+// ---- WAV download (client-side via OfflineAudioContext) ------------------
+
 async function download() {
   showError("");
   try {
-    const data = await fetchGenerate();
-    const blob = new Blob([b64ToBuffer(data.audio)], { type: "audio/wav" });
+    validateDigits($("digits").value);
+    const buf = await renderToWav($("digits").value, readConfig());
+    const blob = new Blob([buf], { type: "audio/wav" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = ($("digits").value || "seize") + ".wav";
@@ -134,17 +94,18 @@ async function download() {
   } catch (e) { showError(e.message); }
 }
 
-// ---- server play ---------------------------------------------------------
+// ---- server-side play (optional, requires server) ------------------------
+
 async function serverPlay() {
   showError("");
   const res = await fetch("/api/play", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ digits: $("digits").value, config: readConfig() }),
-  });
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({ detail: res.statusText }));
-    showError(e.detail || "server play failed");
+  }).catch(() => null);
+  if (!res || !res.ok) {
+    const e = res ? await res.json().catch(() => ({})) : {};
+    showError(e.detail || "server not available");
   }
 }
 
@@ -198,9 +159,9 @@ function drawSpectrum() {
   })();
 }
 
-// ---- presets & devices ---------------------------------------------------
-async function loadPresets() {
-  const { presets } = await (await fetch("/api/presets")).json();
+// ---- presets (localStorage primary, server sync when available) ----------
+
+function renderPresets(presets) {
   const ul = $("presets");
   ul.innerHTML = "";
   for (const p of presets) {
@@ -209,51 +170,81 @@ async function loadPresets() {
     li.title = p.description || "";
     li.onclick = () => {
       $("digits").value = p.digits || "";
-      for (const k of TIMING) if (p.config[k] != null) $(k).value = p.config[k];
-      $("seize_only").checked = !!p.config.seize_only;
+      for (const k of TIMING) if (p.config && p.config[k] != null) $(k).value = p.config[k];
+      $("seize_only").checked = !!(p.config && p.config.seize_only);
     };
     ul.appendChild(li);
   }
+}
+
+async function loadPresets() {
+  let presets = [];
+  try {
+    const r = await fetch("/api/presets");
+    if (r.ok) {
+      presets = (await r.json()).presets;
+      localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+    }
+  } catch {
+    const cached = localStorage.getItem(PRESETS_KEY);
+    if (cached) presets = JSON.parse(cached);
+  }
+  renderPresets(presets);
 }
 
 async function savePreset() {
   const name = prompt("Preset name:");
   if (!name) return;
   showError("");
-  const res = await fetch("/api/presets", {
+  const preset = { name, digits: $("digits").value, config: readConfig(), description: "" };
+
+  // Always save locally first.
+  const cached = JSON.parse(localStorage.getItem(PRESETS_KEY) || "[]");
+  const idx = cached.findIndex(p => p.name === name);
+  if (idx >= 0) cached[idx] = preset; else cached.push(preset);
+  localStorage.setItem(PRESETS_KEY, JSON.stringify(cached));
+
+  // Sync to server if available.
+  fetch("/api/presets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, digits: $("digits").value, config: readConfig() }),
-  });
-  if (res.ok) loadPresets();
-  else {
-    const e = await res.json().catch(() => ({ detail: "save failed" }));
-    showError(e.detail);
-  }
+    body: JSON.stringify(preset),
+  }).catch(() => {});
+
+  loadPresets();
 }
 
 async function loadDevices() {
-  const d = await (await fetch("/api/devices")).json();
-  $("devices").textContent =
-    `${d.backend}: ` + (d.devices.map((x) => x.name).join(", ") || "none");
+  try {
+    const d = await fetch("/api/devices").then(r => r.json());
+    $("devices").textContent =
+      `${d.backend}: ` + (d.devices.map(x => x.name).join(", ") || "none");
+  } catch {
+    $("devices").textContent = "server offline";
+  }
+}
+
+// ---- service worker registration -----------------------------------------
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
 // ---- wiring --------------------------------------------------------------
+
 document.querySelector(".keypad").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   const inp = $("digits");
-  const act = b.dataset.act;
-  const digit = b.dataset.digit;
-  const tone = b.dataset.tone;
+  const { act, digit, tone } = b.dataset;
 
   if (tone === "seize") {
-    kickAudio(); // synchronous, inside click gesture
+    kickAudio();
     playSeizeTone();
   } else if (digit) {
     inp.value += digit;
     if ($("liveMode").checked) {
-      kickAudio(); // synchronous, inside click gesture
+      kickAudio();
       playDigitTone(digit);
     }
   } else if (act === "clear") {
@@ -268,7 +259,6 @@ $("download").onclick = download;
 $("savePreset").onclick = savePreset;
 $("serverPlay").onclick = serverPlay;
 
-// Live playback on any input/parameter change.
 for (const id of ["digits", ...TIMING, "seize_only"]) {
   const el = $(id);
   if (el) el.addEventListener("change", playLiveDebounced);
@@ -277,9 +267,11 @@ for (const id of ["digits", ...TIMING, "seize_only"]) {
 
 (async function init() {
   try {
-    const h = await (await fetch("/api/health")).json();
+    const h = await fetch("/api/health").then(r => r.json());
     setStatus("connected · " + h.audio, "ok");
-  } catch { setStatus("offline", "bad"); }
+  } catch {
+    setStatus("offline", "bad");
+  }
   loadPresets();
   loadDevices();
 })();
