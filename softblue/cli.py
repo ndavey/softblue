@@ -11,6 +11,7 @@ import click
 from .audio import AudioOutput, NoAudioBackendError
 from .config import Config, Settings
 from .engine import COIN_SCHEMES, MODES, InvalidDigitError, ToneEngine
+from .macros import Macro, MacroError, MacroManager
 from .presets import Preset, PresetError, PresetManager
 from .verify import ToneVerifier
 
@@ -214,6 +215,88 @@ def preset_delete(ctx, name):
     except PresetError as e:
         raise click.ClickException(str(e))
     click.echo(f"Deleted preset {name!r}")
+
+
+@cli.group()
+def macro():
+    """Manage macros — chained tone-sequence steps."""
+
+
+@macro.command("list")
+@click.pass_context
+def macro_list(ctx):
+    mgr = MacroManager()
+    for m in mgr.list_all():
+        pin = "★ " if m.get("pinned") else "  "
+        click.echo(f"  {pin}{m['name']:<22} {m.get('description','')}  "
+                   f"({len(m.get('steps', []))} steps)")
+
+
+@macro.command("show")
+@click.argument("name")
+def macro_show(name):
+    try:
+        m = MacroManager().load(name)
+    except MacroError as e:
+        raise click.ClickException(str(e))
+    import json as _json
+    click.echo(_json.dumps(m.to_dict(), indent=2))
+
+
+@macro.command("save")
+@click.argument("name")
+@click.argument("json_file", type=click.Path(exists=True))
+@click.option("--description", default="")
+@click.option("--pin/--no-pin", default=False)
+def macro_save(name, json_file, description, pin):
+    """Save a macro from a JSON file containing a ``steps`` list."""
+    import json as _json
+    raw = _json.loads(Path(json_file).read_text())
+    steps = raw["steps"] if isinstance(raw, dict) and "steps" in raw else raw
+    try:
+        MacroManager().save(Macro(name, steps, description, pin))
+    except MacroError as e:
+        raise click.ClickException(str(e))
+    click.echo(f"Saved macro {name!r}")
+
+
+@macro.command("delete")
+@click.argument("name")
+def macro_delete(name):
+    try:
+        MacroManager().delete(name)
+    except MacroError as e:
+        raise click.ClickException(str(e))
+    click.echo(f"Deleted macro {name!r}")
+
+
+@macro.command("run")
+@click.argument("name")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write to WAV instead of playing")
+@click.pass_context
+def macro_run(ctx, name, output):
+    """Play (or render) a macro through the audio device or to a WAV file."""
+    mgr = MacroManager()
+    pmgr = PresetManager(ctx.obj["settings"].preset_dir)
+    try:
+        m = mgr.load(name)
+        samples = ToneEngine().build_macro(
+            m.steps, ctx.obj["settings"].defaults, pmgr.load)
+    except (MacroError, PresetError, InvalidDigitError, ValueError) as e:
+        raise click.ClickException(str(e))
+    sr = ctx.obj["settings"].defaults.sample_rate
+    if output:
+        ToneEngine().write_wav(output, samples, sr)
+        click.echo(f"Wrote {output} ({len(samples) / sr:.2f}s)")
+        return
+    out = AudioOutput()
+    if not out.available:
+        raise click.ClickException("No audio output available — use --output WAV.")
+    try:
+        out.play(samples, sr, ctx.obj["globals"]["device"])
+    except (NoAudioBackendError, RuntimeError) as e:
+        raise click.ClickException(str(e))
 
 
 @cli.command()

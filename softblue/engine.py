@@ -133,6 +133,8 @@ class ToneEngine:
         if mode not in MODES:
             raise InvalidModeError(f"unknown mode {mode!r} (valid: {', '.join(MODES)})")
         cleaned = (digits or "").strip()
+        if mode in ("mf_r1", "c5"):
+            cleaned = cleaned.lower()
         for ch in cleaned:
             if ch in (" ", "-"):
                 continue
@@ -314,6 +316,45 @@ class ToneEngine:
                 parts.append(self.generate_tone(
                     [self.SEIZURE_FREQ], self.PULSE_2600_MAKE_S, sr, amp))
         return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+    # ---- macros --------------------------------------------------------------
+
+    def build_macro(
+        self,
+        steps: list[dict],
+        base_config: Config,
+        preset_lookup=None,
+    ) -> np.ndarray:
+        """Render a macro (ordered list of steps) into a single sequence.
+
+        Each step is either inline ``{mode, digits, config?, delay_after?}`` or
+        a preset reference ``{preset, delay_after?}``. ``preset_lookup`` is a
+        callable name → Preset used to resolve refs (the CLI/server pass in
+        :py:meth:`softblue.presets.PresetManager.load`).
+        """
+        parts: list[np.ndarray] = []
+        sr = base_config.sample_rate
+        for i, step in enumerate(steps):
+            if "preset" in step:
+                if preset_lookup is None:
+                    raise InvalidModeError(
+                        f"step {i}: preset reference {step['preset']!r} "
+                        "but no preset_lookup provided")
+                p = preset_lookup(step["preset"])
+                parts.append(self.build_sequence(p.digits, p.config))
+            else:
+                overrides = dict(step.get("config", {}) or {})
+                # Step-level ``mode`` takes precedence over any in ``config``.
+                if step.get("mode"):
+                    overrides["mode"] = step["mode"]
+                cfg = base_config.merged(**overrides)
+                cfg.validate()
+                parts.append(self.build_sequence(step.get("digits", ""), cfg))
+            delay = step.get("delay_after", 0) or 0
+            if delay > 0:
+                parts.append(self.generate_silence(delay, sr))
+        out = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+        return self._normalize(out)
 
     # ---- streaming -----------------------------------------------------------
 

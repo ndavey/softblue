@@ -44,6 +44,7 @@ const CLEAR_S = 0.100;   // mf inline "x" clear duration
 
 function validateDigits(digits, mode) {
   mode = mode || "mf_r1";
+  if (mode === "mf_r1" || mode === "c5") digits = (digits || "").toLowerCase();
   for (const d of digits) {
     if (d === " " || d === "-") continue;
     if (!_isValid(d, mode)) {
@@ -80,16 +81,23 @@ function buildSchedule(digits, cfg) {
   const mode = cfg.mode || "mf_r1";
   const events = [];
   let t = 0;
-  const push = (freqs, dur) => { events.push({ freqs, start: t, dur }); t += dur; };
-  const gap = (s) => { t += s || 0; };
+  // _safeDur guards every cfg duration so a cleared input can't NaN-poison t.
+  const push = (freqs, dur) => {
+    dur = _safeDur(dur);
+    if (dur > 0) { events.push({ freqs, start: t, dur }); t += dur; }
+  };
+  const gap = (s) => { const n = _safeDur(s); t += n; };
 
   if (mode === "mf_r1" || mode === "c5") {
+    digits = (digits || "").toLowerCase();
     const sf = mode === "c5" ? C5_SF_FREQ : SEIZURE_FREQ;
     if (cfg.seize_only) {
       if (cfg.seize_duration > 0) push([sf], cfg.seize_duration);
       return { events, total: t };
     }
-    if (_hasInline(digits)) {
+    // `no_wrap` forces literal mode even without inline control chars. Used by
+    // the per-keypress preview path so a plain digit doesn't drag KP+ST along.
+    if (_hasInline(digits) || cfg.no_wrap) {
       let first = true;
       for (const ch of digits) {
         if (ch === " " || ch === "-") continue;
@@ -170,13 +178,23 @@ function buildSchedule(digits, cfg) {
   return { events, total: t };
 }
 
+// Clamp a config duration to a safe finite value so a cleared/NaN input
+// field never propagates NaN into the Web Audio time or gain arguments.
+function _safeDur(v, fallback) {
+  const n = parseFloat(v);
+  return (isFinite(n) && n >= 0) ? n : (fallback || 0);
+}
+
 function _scheduleEvent(ctx, dest, freqs, at, dur, amplitude) {
-  if (dur <= 0) return;
+  dur = _safeDur(dur);
+  amplitude = _safeDur(amplitude, 0.7);
+  if (dur <= 0 || !isFinite(at)) return;
   const fade = Math.min(FADE_S, dur / 4);
   const gain = ctx.createGain();
+  const vol = amplitude / Math.max(1, freqs.length);
   gain.gain.setValueAtTime(0, at);
-  gain.gain.linearRampToValueAtTime(amplitude / freqs.length, at + fade);
-  gain.gain.setValueAtTime(amplitude / freqs.length, at + dur - fade);
+  gain.gain.linearRampToValueAtTime(vol, at + fade);
+  gain.gain.setValueAtTime(vol, at + dur - fade);
   gain.gain.linearRampToValueAtTime(0, at + dur);
   gain.connect(dest);
 
@@ -198,6 +216,37 @@ function playSequenceLive(ctx, dest, digits, cfg) {
     _scheduleEvent(ctx, dest, ev.freqs, base + ev.start, ev.dur, cfg.amplitude);
   }
   return total;
+}
+
+// Resolve a macro step into a (digits, cfg) pair. ``baseCfg`` is the page
+// config; ``presetLookup`` is a name->preset map.
+function _resolveStep(step, baseCfg, presetLookup) {
+  if (step.preset) {
+    const p = (presetLookup || {})[step.preset];
+    if (!p) throw new Error(`preset "${step.preset}" not found`);
+    return { digits: p.digits || "", cfg: Object.assign({}, baseCfg, p.config || {}) };
+  }
+  const cfg = Object.assign({}, baseCfg, step.config || {});
+  if (step.mode) cfg.mode = step.mode;
+  return { digits: step.digits || "", cfg };
+}
+
+// Play a macro (ordered steps with optional delay_after between them).
+// Returns total duration in seconds.
+function playMacroLive(ctx, dest, steps, baseCfg, presetLookup) {
+  const startBase = ctx.currentTime + 0.05;
+  let t = 0;
+  for (const step of steps) {
+    const { digits, cfg } = _resolveStep(step, baseCfg, presetLookup);
+    validateDigits(digits, cfg.mode);
+    const { events, total } = buildSchedule(digits, cfg);
+    for (const ev of events) {
+      _scheduleEvent(ctx, dest, ev.freqs,
+                     startBase + t + ev.start, ev.dur, cfg.amplitude);
+    }
+    t += total + (step.delay_after || 0);
+  }
+  return t;
 }
 
 // Render sequence to a WAV ArrayBuffer (client-side, no server).

@@ -1,0 +1,15 @@
+services:
+  softblue:
+    build: .
+    image: softblue:beta
+    container_name: softblue
+    restart: unless-stopped
+    ports:
+      - "${SOFTBLUE_PORT:-8080}:8080"
+    volumes:
+      - softblue-data:/data
+    environment:
+      SOFTBLUE_HOME: /data
+
+volumes:
+  softblue-data:

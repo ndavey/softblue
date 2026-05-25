@@ -67,7 +67,33 @@ fieldset { border: 1px solid #2a3866; border-radius: 8px; }
 legend { color: var(--text-secondary); font-size: .75rem; padding: 0 6px; }
 .check { display: flex; align-items: center; gap: 6px; }
 .check input { width: auto; }
-.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; align-items: center; }
+
+/* ---- toggle switch ---------------------------------------------------- */
+.toggle-wrap {
+  display: flex; align-items: center; gap: 7px;
+  cursor: pointer; margin: 0; user-select: none;
+}
+.toggle-input { display: none; }
+.toggle-track {
+  position: relative; width: 36px; height: 20px;
+  background: #2a3866; border-radius: 10px;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.toggle-thumb {
+  position: absolute; top: 3px; left: 3px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform 0.2s, background 0.2s;
+}
+.toggle-input:checked + .toggle-track { background: var(--accent-cyan); }
+.toggle-input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(16px);
+  background: var(--bg-primary);
+}
+.toggle-label { font-size: .8rem; color: var(--text-secondary); }
+.toggle-wrap:has(.toggle-input:checked) .toggle-label { color: var(--accent-cyan); }
 .actions button, #serverPlay {
   padding: 10px 16px; border-radius: 6px; cursor: pointer;
   background: var(--bg-primary); color: var(--text-primary);
@@ -136,6 +162,160 @@ select { width: 100%; margin-top: 4px; padding: 7px;
   background: #0e1a3a; border-color: #ff9933; color: #ff9933;
 }
 .keypad .kp-control:hover { color: #ffaa44; border-color: #ffaa44; }
+
+/* ---- macros: pinned tile bar ------------------------------------------ */
+.pinned-bar {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin: -4px 0 -2px;
+}
+.pinned-bar button {
+  flex: 0 1 auto; padding: 8px 14px; font-size: .85rem;
+  background: linear-gradient(135deg, #0e1a3a, #1f0a2a);
+  color: var(--accent-cyan); border: 1px solid var(--accent-cyan);
+  border-radius: 8px; cursor: pointer; font-family: inherit;
+}
+.pinned-bar button:hover { box-shadow: 0 0 8px rgba(0,212,255,0.4); }
+.pinned-bar button:active { background: #1f2a52; }
+.pinned-bar .star { color: var(--accent-magenta); margin-right: 4px; font-size: .9em; }
+
+/* ---- macros: card list ------------------------------------------------ */
+.card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px;
+}
+.card-header h2 { margin: 0; }
+.card-actions { display: flex; gap: 6px; }
+.card-actions button {
+  padding: 5px 10px; font-size: .8rem; cursor: pointer;
+  background: var(--bg-primary); color: var(--text-primary);
+  border: 1px solid #2a3866; border-radius: 6px; font-family: inherit;
+}
+.card-actions button:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+.record-btn.recording {
+  background: var(--danger); color: #fff; border-color: var(--danger);
+  animation: pulse 1.2s infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+.macro-list li {
+  display: grid; grid-template-columns: 28px 28px 1fr auto auto; gap: 6px;
+  align-items: center; cursor: default;
+}
+.macro-list .pin-toggle,
+.macro-list .play-btn,
+.macro-list .edit-btn,
+.macro-list .del-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-secondary); font-size: 1rem; padding: 2px 4px;
+  font-family: inherit;
+}
+.macro-list .pin-toggle.pinned { color: var(--accent-magenta); }
+.macro-list .play-btn { color: var(--success); }
+.macro-list .edit-btn:hover,
+.macro-list .del-btn:hover { color: var(--accent-cyan); }
+.macro-list .del-btn:hover { color: var(--danger); }
+.macro-list .name { color: var(--text-primary); font-weight: 600; }
+.macro-list .meta { color: var(--text-secondary); font-size: .75rem; }
+
+/* ---- macros: collapsible section -------------------------------------- */
+#macrosDetails summary { list-style: none; cursor: pointer; }
+#macrosDetails summary::-webkit-details-marker { display: none; }
+.macros-summary {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 2px 0 8px; margin-bottom: 0; user-select: none;
+}
+.macros-summary h2 { margin: 0; }
+#macrosDetails:not([open]) .macro-list,
+#macrosDetails:not([open]) #recordHint { display: none; }
+
+/* ---- macro editor modal ----------------------------------------------- */
+/* Hidden by default; .is-open class enables it. Never use hidden attribute —
+   display:flex would win over the UA's hidden style. */
+.modal {
+  display: none;
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  align-items: center; justify-content: center; z-index: 100;
+  padding: 16px;
+}
+.modal.is-open { display: flex; }
+.modal-body {
+  background: var(--bg-secondary); border: 1px solid #2a3866;
+  border-radius: 12px; padding: 18px;
+  width: 100%; max-width: 720px; max-height: 90vh;
+  display: flex; flex-direction: column; gap: 12px;
+  overflow: hidden;
+}
+.modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.modal-header h3 { margin: 0; color: var(--accent-cyan); font-size: 1rem; }
+.icon-btn {
+  background: none; border: none; color: var(--text-secondary);
+  font-size: 1.4rem; cursor: pointer; line-height: 1;
+}
+.icon-btn:hover { color: var(--accent-cyan); }
+.modal-grid {
+  display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px;
+  align-items: end;
+}
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid #2a3866; }
+.tabs button {
+  padding: 6px 14px; font-size: .82rem; cursor: pointer;
+  background: none; border: none; color: var(--text-secondary);
+  border-bottom: 2px solid transparent; font-family: inherit;
+}
+.tabs button.selected {
+  color: var(--accent-cyan); border-bottom-color: var(--accent-cyan);
+}
+.tab-pane { overflow-y: auto; min-height: 160px; max-height: 50vh; }
+.step-list {
+  list-style: none; padding: 0; margin: 0 0 10px; display: flex;
+  flex-direction: column; gap: 8px;
+}
+.step-list li {
+  display: grid; gap: 6px;
+  grid-template-columns: 20px 110px 1fr 80px 24px;
+  align-items: center;
+  padding: 6px 8px; border: 1px solid #2a3866; border-radius: 6px;
+  background: var(--bg-primary);
+}
+.step-list .step-idx { color: var(--text-secondary); font-size: .8rem; text-align: right; }
+.step-list select, .step-list input { width: 100%; padding: 5px 6px; font-size: .8rem; }
+.step-list .del-step {
+  background: none; border: none; color: var(--text-secondary);
+  cursor: pointer; font-size: 1rem;
+}
+.step-list .del-step:hover { color: var(--danger); }
+.ghost {
+  padding: 6px 12px; font-size: .8rem; cursor: pointer;
+  background: none; color: var(--accent-cyan);
+  border: 1px dashed var(--accent-cyan); border-radius: 6px; font-family: inherit;
+}
+#macroJson {
+  width: 100%; min-height: 240px; padding: 10px;
+  background: var(--bg-primary); color: var(--accent-cyan);
+  border: 1px solid #2a3866; border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .82rem;
+  resize: vertical;
+}
+.modal-footer {
+  display: flex; gap: 8px; align-items: center;
+  border-top: 1px solid #2a3866; padding-top: 12px;
+}
+.modal-footer .spacer { flex: 1; }
+.modal-footer button {
+  padding: 8px 16px; border-radius: 6px; cursor: pointer; font-family: inherit;
+  background: var(--bg-primary); color: var(--text-primary);
+  border: 1px solid #2a3866;
+}
+.modal-footer button:hover { border-color: var(--accent-cyan); }
+.modal-footer button.primary {
+  background: var(--accent-cyan); color: var(--bg-primary);
+  border-color: var(--accent-cyan); font-weight: 600;
+}
+.modal-footer button.danger {
+  background: var(--danger); color: #fff; border-color: var(--danger);
+}
 
 @media (max-width: 700px) {
   .card.split, .grid, .coin-panel { grid-template-columns: 1fr; }

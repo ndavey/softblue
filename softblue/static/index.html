@@ -21,6 +21,8 @@
 </header>
 
 <main>
+  <div id="pinnedBar" class="pinned-bar" hidden></div>
+
   <section class="card">
     <h2>Sequence Builder</h2>
 
@@ -45,13 +47,14 @@
         <label>Seize <input id="seize_duration" type="number" step="0.1" value="2.0"></label>
         <label>Wink <input id="wink_delay" type="number" step="0.1" value="0.5"></label>
         <label>Digit <input id="digit_duration" type="number" step="0.01" value="0.06"></label>
+        <label>KP <input id="kp_duration" type="number" step="0.01" value="0.1"></label>
+        <label>ST <input id="st_duration" type="number" step="0.01" value="0.1"></label>
         <label>Gap <input id="inter_digit_gap" type="number" step="0.01" value="0.1"></label>
         <label class="check"><input id="seize_only" type="checkbox"> Seize only</label>
       </fieldset>
       <fieldset><legend>Tone</legend>
         <label>Amplitude <input id="amplitude" type="number" step="0.05" min="0" max="1" value="0.7"></label>
         <label>Sample rate <input id="sample_rate" type="number" step="1000" value="8000"></label>
-        <label class="check"><input id="liveMode" type="checkbox"> Live playback</label>
         <label id="coinSchemeWrap" style="display:none">Coin scheme
           <select id="coin_scheme">
             <option value="acts">ACTS (1700+2200 Hz, real Bell)</option>
@@ -62,6 +65,11 @@
     </div>
 
     <div class="actions">
+      <label class="toggle-wrap" title="Play digits as you type / click">
+        <input id="liveMode" type="checkbox" class="toggle-input">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">Live</span>
+      </label>
       <button id="play" class="primary">&#128308; Generate &amp; Play</button>
       <button id="download">&#128190; Download WAV</button>
       <button id="savePreset">Save Preset</button>
@@ -103,6 +111,22 @@
     <canvas id="spectrum" height="160"></canvas>
   </section>
 
+  <section class="card">
+    <details id="macrosDetails">
+      <summary class="card-header macros-summary">
+        <h2>Macros <span id="macroCount" class="muted"></span></h2>
+        <div class="card-actions" onclick="event.stopPropagation()">
+          <button id="recordBtn" class="record-btn" title="Record Play presses into a new macro">● Rec</button>
+          <button id="newMacroBtn">+ New</button>
+        </div>
+      </summary>
+      <p class="muted" id="recordHint" style="display:none">
+        Recording — every <b>Generate &amp; Play</b> press will add a step. Click ● Rec again to save.
+      </p>
+      <ul id="macros" class="list macro-list"></ul>
+    </details>
+  </section>
+
   <section class="card split">
     <div>
       <h2>Presets</h2>
@@ -115,7 +139,41 @@
     </div>
   </section>
 </main>
-<script src="tone-engine.js"></script>
-<script src="app.js"></script>
+
+<!-- Macro editor modal — shown via .is-open class, never via hidden attr -->
+<div id="macroModal" class="modal">
+  <div class="modal-body">
+    <div class="modal-header">
+      <h3 id="macroModalTitle">New Macro</h3>
+      <button id="macroModalClose" class="icon-btn" title="Close">×</button>
+    </div>
+    <div class="modal-grid">
+      <label>Name <input id="macroName" autocomplete="off"></label>
+      <label>Description <input id="macroDesc" autocomplete="off"></label>
+      <label class="check"><input id="macroPinned" type="checkbox"> Pin to top bar</label>
+    </div>
+    <div class="tabs">
+      <button data-tab="steps" class="selected">Steps</button>
+      <button data-tab="json">JSON</button>
+    </div>
+    <div id="tabSteps" class="tab-pane">
+      <ol id="stepList" class="step-list"></ol>
+      <button id="addStepBtn" class="ghost">+ Add step</button>
+    </div>
+    <div id="tabJson" class="tab-pane" hidden>
+      <textarea id="macroJson" spellcheck="false"></textarea>
+      <p id="macroJsonErr" class="error"></p>
+    </div>
+    <div class="modal-footer">
+      <button id="macroDelete" class="danger" hidden>Delete</button>
+      <span class="spacer"></span>
+      <button id="macroCancel">Cancel</button>
+      <button id="macroSave" class="primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="tone-engine.js?v=1.0.0-beta.2"></script>
+<script src="app.js?v=1.0.0-beta.2"></script>
 </body>
 </html>

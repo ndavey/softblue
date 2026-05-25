@@ -1,4 +1,4 @@
-const CACHE = "softblue-v1";
+const CACHE = "softblue-v8";
 const STATIC = ["/", "/style.css", "/tone-engine.js", "/app.js", "/manifest.json", "/favicon.ico", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", e => {

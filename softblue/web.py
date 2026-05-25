@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from .audio import AudioOutput
 from .config import Config, Settings
 from .engine import InvalidDigitError, ToneEngine
+from .macros import Macro, MacroError, MacroManager
 from .presets import Preset, PresetError, PresetManager
 from .verify import ToneVerifier
 
@@ -44,11 +45,19 @@ class PresetModel(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class MacroModel(BaseModel):
+    name: str
+    description: str = ""
+    steps: list[dict] = Field(default_factory=list)
+    pinned: bool = False
+
+
 def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="SoftBlue Web", version="1.0.0")
     engine = ToneEngine()
     audio = AudioOutput()
     presets = PresetManager(settings.preset_dir)
+    macros = MacroManager()
     play_lock = threading.Lock()
 
     def _cfg(data: dict) -> Config:
@@ -132,6 +141,68 @@ def create_app(settings: Settings) -> FastAPI:
         except PresetError as e:
             raise HTTPException(404, str(e))
         return {"status": "deleted"}
+
+    # ---- macros ---------------------------------------------------------
+
+    @app.get("/api/macros")
+    def list_macros():
+        return {"macros": macros.list_all()}
+
+    @app.post("/api/macros")
+    def save_macro(m: MacroModel):
+        try:
+            macros.save(Macro(m.name, m.steps, m.description, m.pinned))
+        except MacroError as e:
+            raise HTTPException(400, str(e))
+        return {"status": "saved"}
+
+    @app.delete("/api/macros/{name}")
+    def delete_macro(name: str):
+        try:
+            macros.delete(name)
+        except MacroError as e:
+            raise HTTPException(404, str(e))
+        return {"status": "deleted"}
+
+    @app.post("/api/macros/{name}/play")
+    async def play_macro(name: str):
+        if not audio.available:
+            raise HTTPException(503, "No audio output available on server")
+        try:
+            macro = macros.load(name)
+            samples = engine.build_macro(macro.steps, settings.defaults, presets.load)
+        except (MacroError, PresetError, InvalidDigitError, ValueError) as e:
+            raise HTTPException(400, str(e))
+
+        def _do_play():
+            if not play_lock.acquire(blocking=False):
+                raise RuntimeError("Audio device busy")
+            try:
+                audio.play(samples, settings.defaults.sample_rate, None)
+            finally:
+                play_lock.release()
+
+        try:
+            await asyncio.to_thread(_do_play)
+        except RuntimeError as e:
+            raise HTTPException(409, str(e))
+        return {"status": "played",
+                "duration": len(samples) / settings.defaults.sample_rate}
+
+    @app.post("/api/macros/{name}/render")
+    def render_macro(name: str):
+        try:
+            macro = macros.load(name)
+            samples = engine.build_macro(macro.steps, settings.defaults, presets.load)
+        except (MacroError, PresetError, InvalidDigitError, ValueError) as e:
+            raise HTTPException(400, str(e))
+        sr = settings.defaults.sample_rate
+        wav = engine.to_wav_bytes(samples, sr)
+        return {
+            "audio": base64.b64encode(wav).decode("ascii"),
+            "duration": len(samples) / sr,
+            "sample_rate": sr,
+        }
 
     @app.websocket("/ws/audio")
     async def audio_stream(ws: WebSocket):

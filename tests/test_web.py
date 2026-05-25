@@ -29,7 +29,7 @@ def test_generate_returns_wav(client):
 
 
 def test_generate_invalid_digit(client):
-    r = client.post("/api/generate", json={"digits": "12X"})
+    r = client.post("/api/generate", json={"digits": "12@"})
     assert r.status_code == 400
     assert "not a valid MF digit" in r.json()["detail"]
 

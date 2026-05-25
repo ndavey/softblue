@@ -18,7 +18,7 @@ def test_generate_writes_wav(tmp_path):
 
 
 def test_generate_invalid_digit():
-    r = run(["generate", "12X", "-o", "/dev/null"])
+    r = run(["generate", "12@", "-o", "/dev/null"])
     assert r.exit_code != 0
     assert "not a valid MF digit" in r.output
 

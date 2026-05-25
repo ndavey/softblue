@@ -2,7 +2,16 @@
 
 const $ = (id) => document.getElementById(id);
 const TIMING = ["seize_duration", "wink_delay", "digit_duration",
+                "kp_duration", "st_duration",
                 "inter_digit_gap", "amplitude", "sample_rate"];
+// Bell R1 / standard bluebox defaults — used when the matching field is
+// missing from the DOM (older cached page) or NaN, so KP/ST always have a
+// nonzero duration and actually emit a tone.
+const TIMING_DEFAULTS = {
+  seize_duration: 2.0, wink_delay: 0.5, digit_duration: 0.06,
+  kp_duration: 0.1, st_duration: 0.1, inter_digit_gap: 0.1,
+  amplitude: 0.7, sample_rate: 8000,
+};
 const PRESETS_KEY = "softblue-presets";
 
 let currentMode = "mf_r1";
@@ -13,26 +22,27 @@ const LIVE_MS = 300;
 // Each entry drives the keypad layout, the hint line, and validation.
 const MODE_DEFS = {
   mf_r1: {
-    hint: "MF/R1 (Bell): 0-9 · k=KP · s=ST · z=2600 seize · x=clear · .=idle. " +
-          "Plain digits auto-wrap KP…ST.",
+    hint: "MF/R1: 0-9 · KP / ST · x=clear · .=idle. Plain digits auto-wrap KP…ST. ▶ SEIZE plays live.",
     keys: [
       ["1","2","3"],
       ["4","5","6"],
       ["7","8","9"],
       [{act:"clear",label:"C"}, "0", {act:"back",label:"←"}],
-      [{ctl:"k",label:"KP"}, {ctl:"s",label:"ST"}, {ctl:".",label:"IDLE"}],
-      [{tone:"seize",label:"SEIZE",cls:"seize-btn",span:3}],
+      [{ctl:"k",label:"KP"}, {ctl:"s",label:"ST"}, {ctl:".",label:"·"}],
+      [{ctl:"x",label:"x·CLR",cls:"kp-control"}, {act:"clear",label:"C"}, {act:"back",label:"←"}],
+      [{tone:"seize",label:"▶ SEIZE (live 2600)",cls:"seize-btn",span:3}],
     ],
   },
   c5: {
-    hint: "CCITT #5: 0-9 · k=KP · s=ST · z=2400 seize · x=clear.",
+    hint: "CCITT #5: 0-9 · KP / ST · x=clear char · .=idle. ▶ SEIZE plays live.",
     keys: [
       ["1","2","3"],
       ["4","5","6"],
       ["7","8","9"],
       [{act:"clear",label:"C"}, "0", {act:"back",label:"←"}],
-      [{ctl:"k",label:"KP"}, {ctl:"s",label:"ST"}, {ctl:"x",label:"CLR"}],
-      [{tone:"seize",label:"SEIZE 2400",cls:"seize-btn",span:3}],
+      [{ctl:"k",label:"KP"}, {ctl:"s",label:"ST"}, {ctl:".",label:"·"}],
+      [{ctl:"x",label:"x·CLR",cls:"kp-control"}, {act:"clear",label:"C"}, {act:"back",label:"←"}],
+      [{tone:"seize",label:"▶ SEIZE (live 2400)",cls:"seize-btn",span:3}],
     ],
   },
   dtmf: {
@@ -76,7 +86,11 @@ const MODE_DEFS = {
 
 function readConfig() {
   const c = {};
-  for (const k of TIMING) c[k] = parseFloat($(k).value);
+  for (const k of TIMING) {
+    const el = $(k);
+    const v = el ? parseFloat(el.value) : NaN;
+    c[k] = (isFinite(v) && v >= 0) ? v : TIMING_DEFAULTS[k];
+  }
   c.seize_only = $("seize_only").checked;
   c.mode = currentMode;
   c.coin_scheme = $("coin_scheme").value;
@@ -163,19 +177,27 @@ function playLocal() {
     validateDigits($("digits").value, cfg.mode);
     const dur = playSequenceLive(audioCtx, analyser, $("digits").value, cfg);
     animateTimeline(dur);
+    captureStepIfRecording();
   } catch (e) {
     showError(e.message);
   }
 }
 
 function playSingle(ch) {
-  // Quick feedback tone for one keypress. Reuses the per-mode schedule with
-  // seize/auto-wrap stripped so it produces just the one event.
+  // Quick feedback for one keypress: play *only* the tone for that key,
+  // never the seize/KP/ST wrap. `no_wrap` forces literal mode so a plain
+  // digit doesn't get KP+ST glued on either side.
   const base = readConfig();
+  const fallback = (isFinite(base.digit_duration) && base.digit_duration > 0)
+                   ? base.digit_duration : 0.1;
   const cfg = Object.assign({}, base, {
-    seize_duration: 0, wink_delay: 0, kp_duration: 0,
-    st_duration: 0, seize_only: false,
+    no_wrap: true,
+    seize_duration: fallback,  // for "z" keypress, kept short for live feedback
+    wink_delay: 0,
+    seize_only: false,
     inter_digit_gap: 0,
+    kp_duration: fallback,  // for "k" keypress
+    st_duration: fallback,  // for "s" keypress
   });
   try {
     playSequenceLive(audioCtx, analyser, ch, cfg);
@@ -187,11 +209,30 @@ function playSeizeTone() {
   playSequenceLive(audioCtx, analyser, "", cfg);
 }
 
+function playLivePreview() {
+  // Live preview = the *content* of the digit field, fast. Skip the auto
+  // seize/wink/KP/ST wrap (MF/C5) so a single keystroke is heard immediately
+  // instead of after a 2-second seize tone.
+  showError("");
+  kickAudio();
+  try {
+    const cfg = Object.assign(readConfig(), {
+      seize_duration: 0, wink_delay: 0, kp_duration: 0, st_duration: 0,
+      seize_only: false,
+    });
+    validateDigits($("digits").value, cfg.mode);
+    const dur = playSequenceLive(audioCtx, analyser, $("digits").value, cfg);
+    animateTimeline(dur);
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
 function playLiveDebounced() {
   if (!$("liveMode").checked) return;
   kickAudio();
   clearTimeout(liveDebounce);
-  liveDebounce = setTimeout(() => playLocal(), LIVE_MS);
+  liveDebounce = setTimeout(() => playLivePreview(), LIVE_MS);
 }
 
 // ---- WAV download --------------------------------------------------------
@@ -307,6 +348,7 @@ async function loadPresets() {
     const cached = localStorage.getItem(PRESETS_KEY);
     if (cached) presets = JSON.parse(cached);
   }
+  presetsCache = presets;
   renderPresets(presets);
 }
 
@@ -386,6 +428,293 @@ document.querySelectorAll(".coin-btns button").forEach(btn => {
 
 $("coinDownload").onclick = downloadCoin;
 
+// ---- macros --------------------------------------------------------------
+
+const MACROS_KEY = "softblue-macros";
+const MODES_LIST = Object.keys(MODE_DEFS);
+let macros = [];
+let presetsCache = [];
+let recording = false;
+let recordBuffer = [];
+let editingMacro = null;   // { name, ...} when editing; null when creating
+
+function presetLookupMap() {
+  const m = {};
+  for (const p of presetsCache) m[p.name] = p;
+  return m;
+}
+
+function renderMacros() {
+  const countEl = $("macroCount");
+  if (countEl) countEl.textContent = macros.length ? `(${macros.length})` : "";
+  const ul = $("macros");
+  ul.innerHTML = "";
+  if (!macros.length) {
+    const li = document.createElement("li");
+    li.style.display = "block";
+    li.className = "muted";
+    li.textContent = "No macros yet — record one or click + New.";
+    ul.appendChild(li);
+  }
+  for (const m of macros) {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <button class="pin-toggle ${m.pinned ? "pinned" : ""}" title="Pin to top bar">★</button>
+      <button class="play-btn" title="Run">▶</button>
+      <span class="name"></span>
+      <span class="meta"></span>
+      <span class="row-actions">
+        <button class="edit-btn" title="Edit">✎</button>
+        <button class="del-btn" title="Delete">×</button>
+      </span>`;
+    li.querySelector(".name").textContent = m.name;
+    li.querySelector(".meta").textContent =
+      `${(m.steps || []).length} step${(m.steps || []).length === 1 ? "" : "s"}` +
+      (m.description ? ` · ${m.description}` : "");
+    li.querySelector(".pin-toggle").onclick = () => togglePin(m);
+    li.querySelector(".play-btn").onclick = () => runMacro(m);
+    li.querySelector(".edit-btn").onclick = () => openMacroEditor(m);
+    li.querySelector(".del-btn").onclick = () => deleteMacro(m);
+    ul.appendChild(li);
+  }
+  renderPinnedBar();
+}
+
+function renderPinnedBar() {
+  const bar = $("pinnedBar");
+  bar.innerHTML = "";
+  const pinned = macros.filter(m => m.pinned).slice(0, 4);
+  if (!pinned.length) { bar.hidden = true; return; }
+  bar.hidden = false;
+  for (const m of pinned) {
+    const b = document.createElement("button");
+    b.innerHTML = `<span class="star">★</span>${m.name}`;
+    b.onclick = () => runMacro(m);
+    bar.appendChild(b);
+  }
+}
+
+function runMacro(m) {
+  showError("");
+  kickAudio();
+  try {
+    const dur = playMacroLive(audioCtx, analyser, m.steps || [], readConfig(),
+                              presetLookupMap());
+    animateTimeline(dur);
+  } catch (e) { showError(`${m.name}: ${e.message}`); }
+}
+
+async function togglePin(m) {
+  m.pinned = !m.pinned;
+  await saveMacro(m, /*silent=*/true);
+  renderMacros();
+}
+
+async function deleteMacro(m) {
+  if (!confirm(`Delete macro "${m.name}"?`)) return;
+  macros = macros.filter(x => x.name !== m.name);
+  cacheMacrosToLocal();
+  renderMacros();
+  fetch(`/api/macros/${encodeURIComponent(m.name)}`, { method: "DELETE" })
+    .catch(() => {});
+}
+
+function cacheMacrosToLocal() {
+  localStorage.setItem(MACROS_KEY, JSON.stringify(macros));
+}
+
+async function loadMacros() {
+  try {
+    const r = await fetch("/api/macros");
+    if (r.ok) {
+      macros = (await r.json()).macros;
+      cacheMacrosToLocal();
+    }
+  } catch {
+    const cached = localStorage.getItem(MACROS_KEY);
+    if (cached) macros = JSON.parse(cached);
+  }
+  renderMacros();
+}
+
+async function saveMacro(m, silent) {
+  const idx = macros.findIndex(x => x.name === m.name);
+  if (idx >= 0) macros[idx] = m; else macros.push(m);
+  cacheMacrosToLocal();
+  fetch("/api/macros", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(m),
+  }).catch(() => {});
+  if (!silent) renderMacros();
+}
+
+// ---- recording -----------------------------------------------------------
+
+function toggleRecord() {
+  if (!recording) {
+    recording = true;
+    recordBuffer = [];
+    $("recordBtn").classList.add("recording");
+    $("recordHint").style.display = "";
+    // Auto-open the section so the hint is visible.
+    $("macrosDetails").open = true;
+  } else {
+    recording = false;
+    $("recordBtn").classList.remove("recording");
+    $("recordHint").style.display = "none";
+    if (!recordBuffer.length) return;
+    openMacroEditor(null, recordBuffer);
+    recordBuffer = [];
+  }
+}
+
+function captureStepIfRecording() {
+  if (!recording) return;
+  const cfg = readConfig();
+  const step = { mode: cfg.mode, digits: $("digits").value };
+  if (cfg.mode === "us_redbox") step.config = { coin_scheme: cfg.coin_scheme };
+  recordBuffer.push(step);
+}
+
+// ---- macro editor modal --------------------------------------------------
+
+const MODAL_DEFAULTS = { mode: "mf_r1", digits: "", delay_after: 0 };
+
+function openMacroEditor(existing, prefilledSteps) {
+  editingMacro = existing;  // null for new
+  $("macroModalTitle").textContent = existing ? `Edit: ${existing.name}` : "New Macro";
+  $("macroName").value = existing?.name || "";
+  $("macroName").disabled = !!existing;
+  $("macroDesc").value = existing?.description || "";
+  $("macroPinned").checked = !!existing?.pinned;
+  $("macroDelete").style.display = existing ? "" : "none";
+  $("macroJsonErr").textContent = "";
+  const steps = existing?.steps || prefilledSteps || [];
+  renderStepList(steps);
+  $("macroJson").value = JSON.stringify(steps, null, 2);
+  switchTab("steps");
+  $("macroModal").classList.add("is-open");
+}
+
+function closeMacroEditor() {
+  $("macroModal").classList.remove("is-open");
+  editingMacro = null;
+}
+
+function switchTab(name) {
+  document.querySelectorAll(".tabs button").forEach(b =>
+    b.classList.toggle("selected", b.dataset.tab === name));
+  $("tabSteps").hidden = name !== "steps";
+  $("tabJson").hidden  = name !== "json";
+  // Keep tabs in sync — if leaving steps, push current steps into JSON.
+  if (name === "json") $("macroJson").value = JSON.stringify(readSteps(), null, 2);
+}
+
+function renderStepList(steps) {
+  const ol = $("stepList");
+  ol.innerHTML = "";
+  steps.forEach((s, i) => ol.appendChild(stepRow(s, i)));
+}
+
+function stepRow(step, i) {
+  const li = document.createElement("li");
+  const mode = step.preset ? "" : (step.mode || MODAL_DEFAULTS.mode);
+  li.innerHTML = `
+    <span class="step-idx">${i + 1}.</span>
+    <select class="step-mode"></select>
+    <input class="step-digits" placeholder="${step.preset ? 'preset: ' + step.preset : 'digits'}">
+    <input class="step-delay" type="number" step="0.1" min="0" placeholder="delay">
+    <button class="del-step" title="Remove step">×</button>`;
+  const sel = li.querySelector(".step-mode");
+  for (const m of ["__preset__", ...MODES_LIST]) {
+    const o = document.createElement("option");
+    o.value = m;
+    o.textContent = m === "__preset__" ? "preset…" : m;
+    sel.appendChild(o);
+  }
+  sel.value = step.preset ? "__preset__" : mode;
+  const digits = li.querySelector(".step-digits");
+  digits.value = step.preset || step.digits || "";
+  li.querySelector(".step-delay").value = step.delay_after || 0;
+  li.querySelector(".del-step").onclick = () => {
+    li.remove();
+    renumberSteps();
+  };
+  return li;
+}
+
+function renumberSteps() {
+  document.querySelectorAll("#stepList li .step-idx")
+    .forEach((s, i) => s.textContent = `${i + 1}.`);
+}
+
+function readSteps() {
+  const steps = [];
+  for (const li of document.querySelectorAll("#stepList li")) {
+    const mode = li.querySelector(".step-mode").value;
+    const val  = li.querySelector(".step-digits").value;
+    const delay = parseFloat(li.querySelector(".step-delay").value) || 0;
+    if (mode === "__preset__") {
+      steps.push({ preset: val, delay_after: delay });
+    } else {
+      steps.push({ mode, digits: val, delay_after: delay });
+    }
+  }
+  return steps;
+}
+
+function saveFromEditor() {
+  let steps;
+  if (!$("tabJson").hidden) {
+    try { steps = JSON.parse($("macroJson").value); }
+    catch (e) {
+      $("macroJsonErr").textContent = "Invalid JSON: " + e.message;
+      return;
+    }
+    if (!Array.isArray(steps)) {
+      $("macroJsonErr").textContent = "Expected a JSON array of steps.";
+      return;
+    }
+  } else {
+    steps = readSteps();
+  }
+  const name = $("macroName").value.trim();
+  if (!name) { $("macroJsonErr").textContent = "Name is required."; return; }
+  const m = {
+    name,
+    description: $("macroDesc").value,
+    pinned: $("macroPinned").checked,
+    steps,
+  };
+  saveMacro(m);
+  closeMacroEditor();
+}
+
+async function deleteFromEditor() {
+  if (!editingMacro) return;
+  if (!confirm(`Delete macro "${editingMacro.name}"?`)) return;
+  await deleteMacro(editingMacro);
+  closeMacroEditor();
+}
+
+// ---- macro wiring --------------------------------------------------------
+
+$("recordBtn").onclick = toggleRecord;
+$("newMacroBtn").onclick = () => openMacroEditor(null);
+$("macroModalClose").onclick = closeMacroEditor;
+$("macroCancel").onclick = closeMacroEditor;
+$("macroSave").onclick = saveFromEditor;
+$("macroDelete").onclick = deleteFromEditor;
+$("addStepBtn").onclick = () => {
+  $("stepList").appendChild(stepRow(MODAL_DEFAULTS, $("stepList").children.length));
+};
+document.querySelectorAll(".tabs button").forEach(b =>
+  b.addEventListener("click", () => switchTab(b.dataset.tab)));
+$("macroModal").addEventListener("click", (e) => {
+  if (e.target === $("macroModal")) closeMacroEditor();
+});
+
 // ---- service worker ------------------------------------------------------
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -441,6 +770,7 @@ renderKeypad();
   } catch {
     setStatus("offline", "bad");
   }
-  loadPresets();
+  await loadPresets();
+  loadMacros();
   loadDevices();
 })();

@@ -18,12 +18,13 @@ from textual.widgets import (
     Label,
     ListItem,
     ListView,
+    Select,
     Static,
 )
 
 from .audio import AudioOutput
 from .config import Config, Settings
-from .engine import InvalidDigitError, ToneEngine
+from .engine import COIN_SCHEMES, MODES, InvalidDigitError, ToneEngine
 from .presets import Preset, PresetError, PresetManager
 
 _FIELDS = [
@@ -67,6 +68,13 @@ class SoftBlueTUI(App):
         d = self.settings.defaults
         with Horizontal():
             with Vertical(id="builder"):
+                yield Label("Mode")
+                yield Select(
+                    [(m, m) for m in MODES], value=d.mode, allow_blank=False, id="mode")
+                yield Label("Coin scheme (US red-box)")
+                yield Select(
+                    [(s, s) for s in COIN_SCHEMES],
+                    value=d.coin_scheme, allow_blank=False, id="coin_scheme")
                 yield Label("Digits")
                 yield Input(value="8675309", id="digits")
                 for key, lbl in _FIELDS:
@@ -101,6 +109,8 @@ class SoftBlueTUI(App):
         for key, _ in _FIELDS:
             vals[key] = float(self.query_one(f"#{key}", Input).value)
         vals["seize_only"] = self.query_one("#seize_only", Checkbox).value
+        vals["mode"] = str(self.query_one("#mode", Select).value)
+        vals["coin_scheme"] = str(self.query_one("#coin_scheme", Select).value)
         cfg = self.settings.defaults.merged(**vals)
         cfg.validate()
         return cfg
@@ -154,6 +164,8 @@ class SoftBlueTUI(App):
         for key, _ in _FIELDS:
             self.query_one(f"#{key}", Input).value = str(getattr(p.config, key))
         self.query_one("#seize_only", Checkbox).value = p.config.seize_only
+        self.query_one("#mode", Select).value = p.config.mode
+        self.query_one("#coin_scheme", Select).value = p.config.coin_scheme
         self._status(f"Loaded {name}")
 
     def on_button_pressed(self, ev: Button.Pressed) -> None:
