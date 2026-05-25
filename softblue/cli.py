@@ -10,9 +10,12 @@ import click
 
 from .audio import AudioOutput, NoAudioBackendError
 from .config import Config, Settings
-from .engine import InvalidDigitError, ToneEngine
+from .engine import COIN_SCHEMES, MODES, InvalidDigitError, ToneEngine
 from .presets import Preset, PresetError, PresetManager
 from .verify import ToneVerifier
+
+_MODE_CHOICE = click.Choice(MODES, case_sensitive=False)
+_SCHEME_CHOICE = click.Choice(COIN_SCHEMES, case_sensitive=False)
 
 # Timing options shared by `generate` and `preset save`, each with a short alias.
 _TIMING = [
@@ -28,6 +31,14 @@ _TIMING = [
 def timing_options(f):
     for long, short, dest, typ, help_ in reversed(_TIMING):
         f = click.option(long, short, dest, type=typ, default=None, help=help_)(f)
+    return f
+
+
+def mode_options(f):
+    f = click.option("--coin-scheme", type=_SCHEME_CHOICE, default=None,
+                     help="US red-box scheme (acts | phreakme)")(f)
+    f = click.option("--mode", "-m", type=_MODE_CHOICE, default=None,
+                     help=f"Signaling mode ({' | '.join(MODES)})")(f)
     return f
 
 
@@ -65,12 +76,14 @@ def cli(ctx, device, sample_rate, amplitude, config_path, verbose):
 @cli.command()
 @click.argument("digits")
 @click.option("--output", "-o", required=True, type=click.Path(), help="Output WAV file")
-@click.option("--seize-only", is_flag=True, default=None, help="Seize trunk only")
+@click.option("--seize-only", is_flag=True, default=None, help="Seize trunk only (mf/c5)")
+@mode_options
 @timing_options
 @click.pass_context
-def generate(ctx, digits, output, seize_only, **timing):
-    """Generate an MF sequence and write it to a WAV file."""
-    cfg = _resolve_config(ctx, seize_only=seize_only, **timing)
+def generate(ctx, digits, output, seize_only, mode, coin_scheme, **timing):
+    """Generate a tone sequence and write it to a WAV file."""
+    cfg = _resolve_config(ctx, seize_only=seize_only, mode=mode,
+                          coin_scheme=coin_scheme, **timing)
     try:
         cfg.validate()
         samples = ToneEngine().build_sequence(digits, cfg)
@@ -86,11 +99,13 @@ def generate(ctx, digits, output, seize_only, **timing):
 @click.option("--loop", "-l", type=int, default=1, help="Loop playback N times")
 @click.option("--countdown", "-n", type=int, default=0, help="Countdown before playing")
 @click.option("--seize-only", is_flag=True, default=None)
+@mode_options
 @timing_options
 @click.pass_context
-def play(ctx, digits, device, loop, countdown, seize_only, **timing):
-    """Generate and play an MF sequence through an audio device."""
-    cfg = _resolve_config(ctx, seize_only=seize_only, **timing)
+def play(ctx, digits, device, loop, countdown, seize_only, mode, coin_scheme, **timing):
+    """Generate and play a tone sequence through an audio device."""
+    cfg = _resolve_config(ctx, seize_only=seize_only, mode=mode,
+                          coin_scheme=coin_scheme, **timing)
     try:
         cfg.validate()
         samples = ToneEngine().build_sequence(digits, cfg)
@@ -156,10 +171,12 @@ def preset_list(ctx):
 @click.option("--digits", default="", help="Digits to dial")
 @click.option("--description", default="", help="Preset description")
 @click.option("--seize-only", is_flag=True, default=None)
+@mode_options
 @timing_options
 @click.pass_context
-def preset_save(ctx, name, digits, description, seize_only, **timing):
-    cfg = _resolve_config(ctx, seize_only=seize_only, **timing)
+def preset_save(ctx, name, digits, description, seize_only, mode, coin_scheme, **timing):
+    cfg = _resolve_config(ctx, seize_only=seize_only, mode=mode,
+                          coin_scheme=coin_scheme, **timing)
     mgr = PresetManager(ctx.obj["settings"].preset_dir)
     try:
         mgr.save(Preset(name=name, digits=digits, config=cfg, description=description))

@@ -43,8 +43,12 @@ class Config:
     st_duration: float = 0.1
     amplitude: float = 0.7
     sample_rate: int = 8000
-    # When true, emit only the 2600 Hz seize tone (no wink/KP/digits/ST).
+    # When true (mf_r1/c5 only), emit just the signaling tone — no wink/KP/digits/ST.
     seize_only: bool = False
+    # Signaling mode — see engine.MODES.
+    mode: str = "mf_r1"
+    # US red-box coin scheme — "acts" (real Bell 1700+2200) or "phreakme" (1700 only).
+    coin_scheme: str = "acts"
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -68,6 +72,14 @@ class Config:
         if self.sample_rate < 8000:
             # All tones (max 2600 Hz) must stay below Nyquist.
             raise ValueError(f"sample_rate must be >= 8000, got {self.sample_rate}")
+        # Avoid circular import — engine imports Config.
+        from .engine import COIN_SCHEMES, MODES
+
+        if self.mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}, got {self.mode!r}")
+        if self.coin_scheme not in COIN_SCHEMES:
+            raise ValueError(
+                f"coin_scheme must be one of {COIN_SCHEMES}, got {self.coin_scheme!r}")
         for name in (
             "seize_duration",
             "wink_delay",

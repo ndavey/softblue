@@ -111,6 +111,32 @@ canvas { width: 100%; display: block; background: var(--bg-primary); border-radi
 .coin-btns button.selected { border-color: #ffaa00; color: #ffaa00; background: #1a1400; }
 .coin-actions { display: flex; align-items: center; gap: 12px; }
 
+/* ---- mode tabs --------------------------------------------------------- */
+.modes {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px;
+}
+.modes button {
+  flex: 1 1 auto; padding: 6px 10px; font-size: .8rem;
+  background: var(--bg-primary); color: var(--text-secondary);
+  border: 1px solid #2a3866; border-radius: 6px; cursor: pointer;
+  font-family: inherit;
+}
+.modes button:hover { color: var(--accent-cyan); border-color: var(--accent-cyan); }
+.modes button.selected {
+  color: var(--accent-cyan); border-color: var(--accent-cyan);
+  background: #0e1a3a;
+}
+#modeHint { margin: 4px 0 8px; }
+select { width: 100%; margin-top: 4px; padding: 7px;
+  background: var(--bg-primary); color: var(--text-primary);
+  border: 1px solid #2a3866; border-radius: 6px; font-family: inherit; font-size: .85rem; }
+.keypad .span2 { grid-column: span 2; }
+.keypad .span3 { grid-column: span 3; }
+.keypad .kp-control {
+  background: #0e1a3a; border-color: #ff9933; color: #ff9933;
+}
+.keypad .kp-control:hover { color: #ffaa44; border-color: #ffaa44; }
+
 @media (max-width: 700px) {
   .card.split, .grid, .coin-panel { grid-template-columns: 1fr; }
 }

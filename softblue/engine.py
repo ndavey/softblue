@@ -1,4 +1,22 @@
-"""Core MF tone synthesis engine (pure numpy + stdlib)."""
+"""Core tone synthesis engine (pure numpy + stdlib).
+
+Modes:
+- ``mf_r1`` — Bell System R1 MF (2-of-6, 2600 Hz seize). Default; preserves
+  the original auto-wrap behavior (seize → wink → KP → digits → ST) when the
+  digit string contains only 0-9. If the string contains any of the inline
+  control characters ``k`` (KP), ``s`` (ST), ``z`` (seize), ``x`` (clear),
+  or ``.`` (idle), the sequence is emitted literally with no auto-wrap.
+- ``c5`` — CCITT #5 international. Same 2-of-6 MF digits as R1 but with a
+  2400 Hz signaling frequency for seize/clear.
+- ``dtmf`` — standard 16-key touch-tone (0-9, *, #, A-D). No seize/KP/ST.
+- ``us_redbox`` — US payphone coin tones. ``1``=nickel, ``2``=dime,
+  ``3``=quarter, ``4``=dollar. Two schemes selectable via ``Config.coin_scheme``:
+  ``acts`` (real Bell 1700+2200 Hz dual tone) and ``phreakme`` (single 1700 Hz,
+  what the emulated PhreakMe payphone listens for).
+- ``uk_redbox`` — UK trunk pips. ``1``=10p (200ms 1000Hz), ``2``=50p (350ms).
+- ``pulse_2600`` — dial-pulse / "whistle" method. Each digit emits N pulses
+  of 2600 Hz (0 = 10 pulses); 60ms break / 40ms make per pulse.
+"""
 
 from __future__ import annotations
 
@@ -12,17 +30,34 @@ from .config import Config
 
 FADE_SECONDS = 0.005  # 5ms raised-cosine edges to suppress clicks
 
+MODES = ("mf_r1", "c5", "dtmf", "us_redbox", "uk_redbox", "pulse_2600")
+COIN_SCHEMES = ("acts", "phreakme")
+
 
 class InvalidDigitError(ValueError):
-    """Raised when a sequence contains a character that is not a valid MF digit."""
+    """Raised when a sequence contains a character invalid for the current mode."""
 
-    def __init__(self, digit: str):
+    _MODE_LABEL = {
+        "mf_r1": "MF", "c5": "C5", "dtmf": "DTMF",
+        "us_redbox": "US red-box", "uk_redbox": "UK red-box",
+        "pulse_2600": "2600-pulse",
+    }
+
+    def __init__(self, digit: str, mode: str = "mf_r1"):
         self.digit = digit
-        super().__init__(f'"{digit}" is not a valid MF digit (valid: 0-9)')
+        self.mode = mode
+        super().__init__(
+            f'"{digit}" is not a valid {self._MODE_LABEL.get(mode, mode)} digit')
+
+
+class InvalidModeError(ValueError):
+    pass
 
 
 class ToneEngine:
-    """Bell System R1 MF tone synthesis."""
+    """Multi-mode bluebox / DTMF / red-box tone synthesis."""
+
+    # ---- tone tables ---------------------------------------------------------
 
     MF_DIGITS = {
         "1": (700, 900), "2": (700, 1100), "3": (900, 1100),
@@ -36,7 +71,34 @@ class ToneEngine:
         "ST2": (900, 1700),
         "ST3": (1300, 1700),
     }
-    SEIZURE_FREQ = 2600
+    SEIZURE_FREQ = 2600   # MF/R1
+    C5_SF_FREQ = 2400     # CCITT #5
+
+    DTMF_DIGITS = {
+        "1": (1209, 697), "2": (1336, 697), "3": (1477, 697), "A": (1633, 697),
+        "4": (1209, 770), "5": (1336, 770), "6": (1477, 770), "B": (1633, 770),
+        "7": (1209, 852), "8": (1336, 852), "9": (1477, 852), "C": (1633, 852),
+        "*": (1209, 941), "0": (1336, 941), "#": (1477, 941), "D": (1633, 941),
+    }
+
+    # US Red Box coin specs. Each entry is a list of (on_seconds, off_seconds)
+    # bursts; the carrier (single or dual freq) is set by ``coin_scheme``.
+    US_REDBOX_BURSTS = {
+        "1": [(0.066, 0.100)],                                       # nickel
+        "2": [(0.066, 0.066), (0.066, 0.100)],                       # dime
+        "3": [(0.033, 0.033)] * 4 + [(0.033, 0.100)],                # quarter
+        "4": [(0.650, 0.100)],                                       # dollar
+    }
+    US_REDBOX_FREQS_ACTS = (1700, 2200)
+    US_REDBOX_FREQS_PHREAKME = (1700,)
+
+    UK_REDBOX = {
+        "1": (1000, 0.200),  # 10p
+        "2": (1000, 0.350),  # 50p
+    }
+
+    PULSE_2600_BREAK_S = 0.060
+    PULSE_2600_MAKE_S = 0.040
 
     # ---- low-level synthesis -------------------------------------------------
 
@@ -63,46 +125,197 @@ class ToneEngine:
     def generate_silence(self, duration: float, sample_rate: int = 8000) -> np.ndarray:
         return np.zeros(max(0, int(sample_rate * duration)), dtype=np.float32)
 
-    # ---- sequence ------------------------------------------------------------
+    # ---- validation ----------------------------------------------------------
 
     @classmethod
-    def validate_digits(cls, digits: str) -> str:
-        """Normalise/validate a digit string, raising on the first bad char."""
+    def validate_digits(cls, digits: str, mode: str = "mf_r1") -> str:
+        """Normalise/validate a digit string for the given mode."""
+        if mode not in MODES:
+            raise InvalidModeError(f"unknown mode {mode!r} (valid: {', '.join(MODES)})")
         cleaned = (digits or "").strip()
         for ch in cleaned:
             if ch in (" ", "-"):
                 continue
-            if ch not in cls.MF_DIGITS:
-                raise InvalidDigitError(ch)
+            if not cls._is_valid_for_mode(ch, mode):
+                raise InvalidDigitError(ch, mode)
         return cleaned
 
+    @classmethod
+    def _is_valid_for_mode(cls, ch: str, mode: str) -> bool:
+        if mode in ("mf_r1", "c5"):
+            return ch in cls.MF_DIGITS or ch in ("k", "s", "z", "x", ".")
+        if mode == "dtmf":
+            return ch.upper() in cls.DTMF_DIGITS
+        if mode == "us_redbox":
+            return ch in cls.US_REDBOX_BURSTS
+        if mode == "uk_redbox":
+            return ch in cls.UK_REDBOX
+        if mode == "pulse_2600":
+            return ch.isdigit()
+        return False
+
+    # ---- sequence dispatch ---------------------------------------------------
+
     def build_sequence(self, digits: str, config: Config) -> np.ndarray:
-        """Build a complete MF sequence: seize [→ wink → KP → digits → ST]."""
+        """Build a complete tone sequence for ``config.mode``."""
+        mode = getattr(config, "mode", "mf_r1") or "mf_r1"
+        cleaned = self.validate_digits(digits, mode)
+        if mode == "mf_r1":
+            out = self._build_mf(cleaned, config, sf_freq=self.SEIZURE_FREQ)
+        elif mode == "c5":
+            out = self._build_mf(cleaned, config, sf_freq=self.C5_SF_FREQ)
+        elif mode == "dtmf":
+            out = self._build_dtmf(cleaned, config)
+        elif mode == "us_redbox":
+            out = self._build_us_redbox(cleaned, config)
+        elif mode == "uk_redbox":
+            out = self._build_uk_redbox(cleaned, config)
+        elif mode == "pulse_2600":
+            out = self._build_pulse_2600(cleaned, config)
+        else:  # pragma: no cover - guarded by validate_digits
+            raise InvalidModeError(mode)
+        return self._normalize(out)
+
+    # ---- mode: MF / C5 -------------------------------------------------------
+
+    def _has_inline(self, digits: str) -> bool:
+        return any(ch in ("k", "s", "z", "x", ".") for ch in digits)
+
+    def _build_mf(self, digits: str, config: Config, sf_freq: int) -> np.ndarray:
+        """MF R1 / C5. Auto-wrap (seize→wink→KP→digits→ST) unless inline
+        control chars are present, in which case emit literally."""
         sr = config.sample_rate
         amp = config.amplitude
-        parts: list[np.ndarray] = [
-            self.generate_tone([self.SEIZURE_FREQ], config.seize_duration, sr, amp)
-        ]
+        parts: list[np.ndarray] = []
 
-        if not config.seize_only:
-            digits = self.validate_digits(digits)
+        if config.seize_only:
+            parts.append(self.generate_tone([sf_freq], config.seize_duration, sr, amp))
+            return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+        inline = self._has_inline(digits)
+
+        if inline:
+            # Literal mode — emit exactly what the user typed, with inter-digit
+            # gaps between events. No auto seize/KP/ST.
+            first = True
+            for ch in digits:
+                if ch in (" ", "-"):
+                    continue
+                if not first:
+                    parts.append(self.generate_silence(config.inter_digit_gap, sr))
+                first = False
+                if ch in self.MF_DIGITS:
+                    parts.append(self.generate_tone(
+                        self.MF_DIGITS[ch], config.digit_duration, sr, amp))
+                elif ch == "k":
+                    parts.append(self.generate_tone(
+                        self.MF_SPECIAL["KP"], config.kp_duration, sr, amp))
+                elif ch == "s":
+                    parts.append(self.generate_tone(
+                        self.MF_SPECIAL["ST"], config.st_duration, sr, amp))
+                elif ch == "z":
+                    parts.append(self.generate_tone(
+                        [sf_freq], config.seize_duration, sr, amp))
+                elif ch == "x":
+                    parts.append(self.generate_tone([sf_freq], 0.100, sr, amp))
+                elif ch == ".":
+                    parts.append(self.generate_tone(
+                        [sf_freq], config.digit_duration, sr, amp))
+        else:
+            # Backward-compatible auto-wrap path.
+            parts.append(self.generate_tone([sf_freq], config.seize_duration, sr, amp))
             parts.append(self.generate_silence(config.wink_delay, sr))
-            parts.append(
-                self.generate_tone(self.MF_SPECIAL["KP"], config.kp_duration, sr, amp)
-            )
-            real = [d for d in digits if d not in (" ", "-")]
-            for i, digit in enumerate(real):
+            parts.append(self.generate_tone(
+                self.MF_SPECIAL["KP"], config.kp_duration, sr, amp))
+            for ch in digits:
+                if ch in (" ", "-"):
+                    continue
                 parts.append(self.generate_silence(config.inter_digit_gap, sr))
-                parts.append(
-                    self.generate_tone(self.MF_DIGITS[digit], config.digit_duration, sr, amp)
-                )
+                parts.append(self.generate_tone(
+                    self.MF_DIGITS[ch], config.digit_duration, sr, amp))
             parts.append(self.generate_silence(config.inter_digit_gap, sr))
-            parts.append(
-                self.generate_tone(self.MF_SPECIAL["ST"], config.st_duration, sr, amp)
-            )
+            parts.append(self.generate_tone(
+                self.MF_SPECIAL["ST"], config.st_duration, sr, amp))
 
-        out = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
-        return self._normalize(out)
+        return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+    # ---- mode: DTMF ----------------------------------------------------------
+
+    def _build_dtmf(self, digits: str, config: Config) -> np.ndarray:
+        sr, amp = config.sample_rate, config.amplitude
+        parts: list[np.ndarray] = []
+        first = True
+        for ch in digits:
+            if ch in (" ", "-"):
+                continue
+            if not first:
+                parts.append(self.generate_silence(config.inter_digit_gap, sr))
+            first = False
+            parts.append(self.generate_tone(
+                self.DTMF_DIGITS[ch.upper()], config.digit_duration, sr, amp))
+        return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+    # ---- mode: US Red Box ----------------------------------------------------
+
+    def _build_us_redbox(self, digits: str, config: Config) -> np.ndarray:
+        scheme = getattr(config, "coin_scheme", "acts") or "acts"
+        if scheme not in COIN_SCHEMES:
+            raise InvalidModeError(
+                f"unknown coin_scheme {scheme!r} (valid: {', '.join(COIN_SCHEMES)})")
+        freqs = (self.US_REDBOX_FREQS_ACTS if scheme == "acts"
+                 else self.US_REDBOX_FREQS_PHREAKME)
+        sr, amp = config.sample_rate, config.amplitude
+        parts: list[np.ndarray] = []
+        first = True
+        for ch in digits:
+            if ch in (" ", "-"):
+                continue
+            if not first:
+                parts.append(self.generate_silence(config.inter_digit_gap, sr))
+            first = False
+            for on_s, off_s in self.US_REDBOX_BURSTS[ch]:
+                parts.append(self.generate_tone(list(freqs), on_s, sr, amp))
+                if off_s > 0:
+                    parts.append(self.generate_silence(off_s, sr))
+        return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+    # ---- mode: UK Red Box ----------------------------------------------------
+
+    def _build_uk_redbox(self, digits: str, config: Config) -> np.ndarray:
+        sr, amp = config.sample_rate, config.amplitude
+        parts: list[np.ndarray] = []
+        first = True
+        for ch in digits:
+            if ch in (" ", "-"):
+                continue
+            if not first:
+                parts.append(self.generate_silence(config.inter_digit_gap, sr))
+            first = False
+            freq, dur = self.UK_REDBOX[ch]
+            parts.append(self.generate_tone([freq], dur, sr, amp))
+        return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+    # ---- mode: 2600 dial pulse ----------------------------------------------
+
+    def _build_pulse_2600(self, digits: str, config: Config) -> np.ndarray:
+        sr, amp = config.sample_rate, config.amplitude
+        parts: list[np.ndarray] = []
+        first = True
+        for ch in digits:
+            if ch in (" ", "-"):
+                continue
+            if not first:
+                parts.append(self.generate_silence(config.inter_digit_gap, sr))
+            first = False
+            n = int(ch)
+            pulses = 10 if n == 0 else n
+            for _ in range(pulses):
+                parts.append(self.generate_silence(self.PULSE_2600_BREAK_S, sr))
+                parts.append(self.generate_tone(
+                    [self.SEIZURE_FREQ], self.PULSE_2600_MAKE_S, sr, amp))
+        return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+    # ---- streaming -----------------------------------------------------------
 
     def generate_chunks(
         self, digits: str, config: Config, chunk_ms: int = 100

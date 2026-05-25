@@ -1,7 +1,10 @@
 "use strict";
 
-// Client-side Bell System R1 MF synthesis via Web Audio API oscillators.
-// No server required — works fully offline.
+// Client-side tone synthesis via Web Audio API. Mirrors the Python engine:
+// MF/R1, C5, DTMF, US red-box (ACTS + PhreakMe), UK red-box, 2600 dial-pulse,
+// plus 1-slot / 3-slot coin tones.
+
+// ---- tone tables ---------------------------------------------------------
 
 const MF_DIGITS = {
   "1": [700, 900],  "2": [700, 1100], "3": [900, 1100],
@@ -10,41 +13,157 @@ const MF_DIGITS = {
   "0": [1300, 1500],
 };
 const MF_SPECIAL = { KP: [1100, 1700], ST: [1500, 1700] };
-const SEIZURE_FREQ = 2600;
-const FADE_S = 0.005;
+const SEIZURE_FREQ = 2600;     // MF/R1
+const C5_SF_FREQ   = 2400;     // CCITT #5
 
-function validateDigits(digits) {
+const DTMF_DIGITS = {
+  "1": [1209, 697], "2": [1336, 697], "3": [1477, 697], "A": [1633, 697],
+  "4": [1209, 770], "5": [1336, 770], "6": [1477, 770], "B": [1633, 770],
+  "7": [1209, 852], "8": [1336, 852], "9": [1477, 852], "C": [1633, 852],
+  "*": [1209, 941], "0": [1336, 941], "#": [1477, 941], "D": [1633, 941],
+};
+
+const US_REDBOX_BURSTS = {
+  "1": [[0.066, 0.100]],
+  "2": [[0.066, 0.066], [0.066, 0.100]],
+  "3": [[0.033, 0.033], [0.033, 0.033], [0.033, 0.033], [0.033, 0.033], [0.033, 0.100]],
+  "4": [[0.650, 0.100]],
+};
+const US_REDBOX_FREQS_ACTS = [1700, 2200];
+const US_REDBOX_FREQS_PHREAKME = [1700];
+
+const UK_REDBOX = { "1": [1000, 0.200], "2": [1000, 0.350] };
+
+const PULSE_BREAK_S = 0.060;
+const PULSE_MAKE_S = 0.040;
+
+const FADE_S = 0.005;
+const CLEAR_S = 0.100;   // mf inline "x" clear duration
+
+// ---- validation ---------------------------------------------------------
+
+function validateDigits(digits, mode) {
+  mode = mode || "mf_r1";
   for (const d of digits) {
     if (d === " " || d === "-") continue;
-    if (!MF_DIGITS[d]) throw new Error(`"${d}" is not a valid MF digit`);
+    if (!_isValid(d, mode)) {
+      throw new Error(`"${d}" is not a valid ${_modeLabel(mode)} digit`);
+    }
   }
 }
 
+function _isValid(ch, mode) {
+  if (mode === "mf_r1" || mode === "c5") {
+    return MF_DIGITS[ch] != null || "kszx.".indexOf(ch) >= 0;
+  }
+  if (mode === "dtmf")      return DTMF_DIGITS[ch.toUpperCase()] != null;
+  if (mode === "us_redbox") return US_REDBOX_BURSTS[ch] != null;
+  if (mode === "uk_redbox") return UK_REDBOX[ch] != null;
+  if (mode === "pulse_2600") return /^[0-9]$/.test(ch);
+  return false;
+}
+
+function _modeLabel(mode) {
+  return {mf_r1:"MF", c5:"C5", dtmf:"DTMF",
+          us_redbox:"US red-box", uk_redbox:"UK red-box",
+          pulse_2600:"2600-pulse"}[mode] || mode;
+}
+
+// ---- schedule building --------------------------------------------------
+
+function _hasInline(digits) {
+  for (const ch of digits) if ("kszx.".indexOf(ch) >= 0) return true;
+  return false;
+}
+
 function buildSchedule(digits, cfg) {
+  const mode = cfg.mode || "mf_r1";
   const events = [];
   let t = 0;
+  const push = (freqs, dur) => { events.push({ freqs, start: t, dur }); t += dur; };
+  const gap = (s) => { t += s || 0; };
 
-  if (cfg.seize_duration > 0) {
-    events.push({ freqs: [SEIZURE_FREQ], start: t, dur: cfg.seize_duration });
-    t += cfg.seize_duration;
+  if (mode === "mf_r1" || mode === "c5") {
+    const sf = mode === "c5" ? C5_SF_FREQ : SEIZURE_FREQ;
+    if (cfg.seize_only) {
+      if (cfg.seize_duration > 0) push([sf], cfg.seize_duration);
+      return { events, total: t };
+    }
+    if (_hasInline(digits)) {
+      let first = true;
+      for (const ch of digits) {
+        if (ch === " " || ch === "-") continue;
+        if (!first) gap(cfg.inter_digit_gap);
+        first = false;
+        if (MF_DIGITS[ch])       push(MF_DIGITS[ch], cfg.digit_duration);
+        else if (ch === "k")     push(MF_SPECIAL.KP, cfg.kp_duration);
+        else if (ch === "s")     push(MF_SPECIAL.ST, cfg.st_duration);
+        else if (ch === "z")     push([sf], cfg.seize_duration);
+        else if (ch === "x")     push([sf], CLEAR_S);
+        else if (ch === ".")     push([sf], cfg.digit_duration);
+      }
+    } else {
+      if (cfg.seize_duration > 0) push([sf], cfg.seize_duration);
+      gap(cfg.wink_delay);
+      if (cfg.kp_duration > 0) push(MF_SPECIAL.KP, cfg.kp_duration);
+      for (const ch of digits) {
+        if (ch === " " || ch === "-") continue;
+        gap(cfg.inter_digit_gap);
+        push(MF_DIGITS[ch], cfg.digit_duration);
+      }
+      gap(cfg.inter_digit_gap);
+      if (cfg.st_duration > 0) push(MF_SPECIAL.ST, cfg.st_duration);
+    }
   }
 
-  if (!cfg.seize_only) {
-    t += cfg.wink_delay || 0;
-    if (cfg.kp_duration > 0) {
-      events.push({ freqs: MF_SPECIAL.KP, start: t, dur: cfg.kp_duration });
-      t += cfg.kp_duration;
+  else if (mode === "dtmf") {
+    let first = true;
+    for (const ch of digits) {
+      if (ch === " " || ch === "-") continue;
+      if (!first) gap(cfg.inter_digit_gap);
+      first = false;
+      push(DTMF_DIGITS[ch.toUpperCase()], cfg.digit_duration);
     }
-    for (const d of digits) {
-      if (d === " " || d === "-") continue;
-      t += cfg.inter_digit_gap || 0;
-      events.push({ freqs: MF_DIGITS[d], start: t, dur: cfg.digit_duration });
-      t += cfg.digit_duration;
+  }
+
+  else if (mode === "us_redbox") {
+    const freqs = cfg.coin_scheme === "phreakme"
+        ? US_REDBOX_FREQS_PHREAKME : US_REDBOX_FREQS_ACTS;
+    let first = true;
+    for (const ch of digits) {
+      if (ch === " " || ch === "-") continue;
+      if (!first) gap(cfg.inter_digit_gap);
+      first = false;
+      for (const [on, off] of US_REDBOX_BURSTS[ch]) {
+        push(freqs, on);
+        gap(off);
+      }
     }
-    t += cfg.inter_digit_gap || 0;
-    if (cfg.st_duration > 0) {
-      events.push({ freqs: MF_SPECIAL.ST, start: t, dur: cfg.st_duration });
-      t += cfg.st_duration;
+  }
+
+  else if (mode === "uk_redbox") {
+    let first = true;
+    for (const ch of digits) {
+      if (ch === " " || ch === "-") continue;
+      if (!first) gap(cfg.inter_digit_gap);
+      first = false;
+      const [freq, dur] = UK_REDBOX[ch];
+      push([freq], dur);
+    }
+  }
+
+  else if (mode === "pulse_2600") {
+    let first = true;
+    for (const ch of digits) {
+      if (ch === " " || ch === "-") continue;
+      if (!first) gap(cfg.inter_digit_gap);
+      first = false;
+      const n = parseInt(ch, 10);
+      const pulses = n === 0 ? 10 : n;
+      for (let i = 0; i < pulses; i++) {
+        gap(PULSE_BREAK_S);
+        push([SEIZURE_FREQ], PULSE_MAKE_S);
+      }
     }
   }
 
@@ -71,8 +190,7 @@ function _scheduleEvent(ctx, dest, freqs, at, dur, amplitude) {
   }
 }
 
-// Play sequence immediately through a live AudioContext.
-// Returns total duration in seconds.
+// Play sequence immediately through a live AudioContext. Returns duration (s).
 function playSequenceLive(ctx, dest, digits, cfg) {
   const { events, total } = buildSchedule(digits, cfg);
   const base = ctx.currentTime + 0.05;
@@ -88,21 +206,15 @@ async function renderToWav(digits, cfg) {
   const { events, total } = buildSchedule(digits, cfg);
   const nFrames = Math.ceil(total * sr) + sr;
   const offline = new OfflineAudioContext(1, nFrames, sr);
-
   for (const ev of events) {
     _scheduleEvent(offline, offline.destination, ev.freqs, ev.start, ev.dur, cfg.amplitude);
   }
-
   const buffer = await offline.startRendering();
   return _encodeWav(buffer.getChannelData(0), sr);
 }
 
-// ---- Coin tones ----------------------------------------------------------
+// ---- Coin tones (1-slot ACTS / PhreakMe and 3-slot bell) ----------------
 
-// 1-slot ACTS red-box specs (Bell System, confirmed):
-// All denominations: 1700 Hz + 2200 Hz dual tone.
-// Denomination encoded by number and duration of bursts.
-const COIN_FREQS_1SLOT = [1700, 2200];
 const COIN_1SLOT = {
   nickel:  { pulses: 1, on: 0.066, off: 0.066 },
   dime:    { pulses: 2, on: 0.066, off: 0.066 },
@@ -111,16 +223,12 @@ const COIN_1SLOT = {
 };
 
 // 3-slot mechanical bell tones (synthesized approximation).
-// Real phones use physical bells struck by coins — these are the operator-
-// heard sounds, not electronic signals. Frequencies vary by phone model;
-// values here are common approximations used in emulation.
 const COIN_3SLOT = {
   nickel:  { freq: 1664, pulses: 1, bellDur: 0.35, gap: 0 },
   dime:    { freq: 1664, pulses: 2, bellDur: 0.35, gap: 0.2 },
-  quarter: { freq: 800,  pulses: 1, bellDur: 0.70, gap: 0 },  // lower gong
+  quarter: { freq: 800,  pulses: 1, bellDur: 0.70, gap: 0 },
 };
 
-// Schedule one exponentially-decaying bell strike (mimics physical ding).
 function _scheduleBell(ctx, dest, freq, at, dur, amplitude) {
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(amplitude, at + 0.002);
@@ -134,18 +242,17 @@ function _scheduleBell(ctx, dest, freq, at, dur, amplitude) {
   osc.stop(at + dur);
 }
 
-// Play coin tone live. slot = "1slot" | "3slot".
-// denomination = "nickel" | "dime" | "quarter" | "dollar" (dollar: 1-slot only).
-// Returns total duration in seconds.
-function playCoinLive(ctx, dest, denomination, slot, amplitude) {
+// Play coin tone live. ``scheme`` ("acts"|"phreakme") only applies to 1-slot.
+function playCoinLive(ctx, dest, denomination, slot, amplitude, scheme) {
   const base = ctx.currentTime + 0.05;
   amplitude = amplitude || 0.7;
   if (slot === "1slot") {
     const spec = COIN_1SLOT[denomination];
     if (!spec) throw new Error("Unknown denomination: " + denomination);
+    const freqs = scheme === "phreakme" ? US_REDBOX_FREQS_PHREAKME : US_REDBOX_FREQS_ACTS;
     let t = 0;
     for (let i = 0; i < spec.pulses; i++) {
-      _scheduleEvent(ctx, dest, COIN_FREQS_1SLOT, base + t, spec.on, amplitude);
+      _scheduleEvent(ctx, dest, freqs, base + t, spec.on, amplitude);
       t += spec.on + spec.off;
     }
     return t;
@@ -161,39 +268,36 @@ function playCoinLive(ctx, dest, denomination, slot, amplitude) {
   }
 }
 
-// Render coin tone to WAV bytes.
-async function renderCoinToWav(denomination, slot, amplitude, sampleRate) {
+async function renderCoinToWav(denomination, slot, amplitude, sampleRate, scheme) {
   const sr = sampleRate || 8000;
   amplitude = amplitude || 0.7;
-  let totalDur = 0;
-  const scheduleItems = []; // collect what to render
-
+  const items = [];
+  let total = 0;
   if (slot === "1slot") {
     const spec = COIN_1SLOT[denomination];
+    const freqs = scheme === "phreakme" ? US_REDBOX_FREQS_PHREAKME : US_REDBOX_FREQS_ACTS;
     let t = 0;
     for (let i = 0; i < spec.pulses; i++) {
-      scheduleItems.push({ type: "tone", freqs: COIN_FREQS_1SLOT, at: t, dur: spec.on });
+      items.push({ type: "tone", freqs, at: t, dur: spec.on });
       t += spec.on + spec.off;
     }
-    totalDur = t;
+    total = t;
   } else {
     const spec = COIN_3SLOT[denomination];
     let t = 0;
     for (let i = 0; i < spec.pulses; i++) {
-      scheduleItems.push({ type: "bell", freq: spec.freq, at: t, dur: spec.bellDur });
+      items.push({ type: "bell", freq: spec.freq, at: t, dur: spec.bellDur });
       t += spec.bellDur + spec.gap;
     }
-    totalDur = t;
+    total = t;
   }
-
-  const nFrames = Math.ceil(totalDur * sr) + sr;
+  const nFrames = Math.ceil(total * sr) + sr;
   const offline = new OfflineAudioContext(1, nFrames, sr);
-  for (const item of scheduleItems) {
-    if (item.type === "tone") {
-      _scheduleEvent(offline, offline.destination, item.freqs, item.at, item.dur, amplitude);
-    } else {
-      _scheduleBell(offline, offline.destination, item.freq, item.at, item.dur, amplitude);
-    }
+  for (const it of items) {
+    if (it.type === "tone")
+      _scheduleEvent(offline, offline.destination, it.freqs, it.at, it.dur, amplitude);
+    else
+      _scheduleBell(offline, offline.destination, it.freq, it.at, it.dur, amplitude);
   }
   const buffer = await offline.startRendering();
   return _encodeWav(buffer.getChannelData(0), sr);
