@@ -18,6 +18,14 @@ let currentMode = "mf_r1";
 let liveDebounce;
 const LIVE_MS = 300;
 
+// ---- sweep + mic state (isolated from main sequence config) ---------------
+let lockedSeizeHz = null;   // null = engine default; only set via sweep lock
+let micStream = null;
+let micSource = null;
+let micNode = null;
+let sweepRunning = false;
+let sweepCurrentHz = null;
+
 // ---- mode definitions ----------------------------------------------------
 // Each entry drives the keypad layout, the hint line, and validation.
 const MODE_DEFS = {
@@ -94,6 +102,9 @@ function readConfig() {
   c.seize_only = $("seize_only").checked;
   c.mode = currentMode;
   c.coin_scheme = $("coin_scheme").value;
+  // seize_freq comes only from an explicit sweep lock — never from timing panel
+  c.seize_freq = lockedSeizeHz;
+  c.mf_variant = $("mf_variant") ? $("mf_variant").value : "standard";
   return c;
 }
 
@@ -132,10 +143,13 @@ function renderKeypad() {
   }
   $("modeHint").textContent = def.hint;
   $("coinSchemeWrap").style.display = currentMode === "us_redbox" ? "" : "none";
+  // MF-only controls
+  const isMF = currentMode === "mf_r1" || currentMode === "c5";
+  $("mf_variant_wrap").style.display = isMF ? "" : "none";
+  $("sweepCard").style.display = isMF ? "" : "none";
   // The "Seize only" checkbox only makes sense in MF/C5.
   const seizeOnlyRow = $("seize_only").parentElement;
-  seizeOnlyRow.style.display =
-    (currentMode === "mf_r1" || currentMode === "c5") ? "" : "none";
+  seizeOnlyRow.style.display = isMF ? "" : "none";
 }
 
 function setMode(mode) {
@@ -715,6 +729,210 @@ $("macroModal").addEventListener("click", (e) => {
   if (e.target === $("macroModal")) closeMacroEditor();
 });
 
+// ---- mic recording -------------------------------------------------------
+
+async function enableMic() {
+  try {
+    ensureAudio();
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micSource = audioCtx.createMediaStreamSource(micStream);
+    micNode = audioCtx.createAnalyser();
+    micNode.fftSize = 1024;
+    micSource.connect(micNode);
+    $("micStatus").textContent = "Mic: ● live";
+    $("micStatus").style.color = "var(--success)";
+    runMicMeter();
+    return true;
+  } catch (e) {
+    $("micStatus").textContent = "Mic: " + (e.name === "NotAllowedError" ? "permission denied" : e.message);
+    $("micStatus").style.color = "var(--danger)";
+    return false;
+  }
+}
+
+function disableMic() {
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (micSource) { micSource.disconnect(); micSource = null; }
+  micNode = null;
+  $("micStatus").textContent = "Mic: off";
+  $("micStatus").style.color = "";
+}
+
+function runMicMeter() {
+  const canvas = $("micMeter");
+  if (!canvas) return;
+  const c = canvas.getContext("2d");
+  (function frame() {
+    if (!micNode) return;
+    requestAnimationFrame(frame);
+    const td = new Float32Array(micNode.fftSize);
+    micNode.getFloatTimeDomainData(td);
+    let rms = 0;
+    for (const v of td) rms += v * v;
+    rms = Math.sqrt(rms / td.length);
+    const threshold = parseFloat($("micThreshold").value) || 0.02;
+    canvas.width = canvas.clientWidth;
+    c.fillStyle = "#1f2a52";
+    c.fillRect(0, 0, canvas.width, canvas.height);
+    c.fillStyle = rms > threshold ? "var(--success)" : "var(--accent-cyan)";
+    c.fillRect(0, 0, Math.min(canvas.width, rms * canvas.width * 20), canvas.height);
+  })();
+}
+
+// Sample mic RMS in 50ms bins for durationS seconds.
+async function recordMicWindow(durationS) {
+  if (!micNode) return null;
+  const BIN_MS = 50;
+  const numBins = Math.max(1, Math.floor(durationS * 1000 / BIN_MS));
+  const bins = [];
+  for (let i = 0; i < numBins; i++) {
+    await new Promise(r => setTimeout(r, BIN_MS));
+    if (!micNode) break;
+    const td = new Float32Array(micNode.fftSize);
+    micNode.getFloatTimeDomainData(td);
+    let rms = 0;
+    for (const v of td) rms += v * v;
+    bins.push(Math.sqrt(rms / td.length));
+  }
+  return bins;
+}
+
+// Find contiguous runs above threshold; return events with timing + duration.
+function detectEvents(bins, threshold) {
+  const events = [];
+  let inEvt = false, start = 0;
+  for (let i = 0; i < bins.length; i++) {
+    if (bins[i] > threshold && !inEvt) { inEvt = true; start = i; }
+    else if (bins[i] <= threshold && inEvt) {
+      inEvt = false;
+      events.push({ startMs: start * 50, durMs: (i - start) * 50 });
+    }
+  }
+  if (inEvt) events.push({ startMs: start * 50, durMs: (bins.length - start) * 50 });
+  return events;
+}
+
+// Mini bar using Unicode blocks for the results table energy column.
+function energyBar(bins) {
+  if (!bins || !bins.length) return "—";
+  const peak = Math.max(...bins, 0.001);
+  const CHARS = " ▁▂▃▄▅▆▇█";
+  return bins.map(v => CHARS[Math.min(8, Math.floor((v / peak) * 8))]).join("");
+}
+
+// ---- seize tone sweep ----------------------------------------------------
+
+function updateLockedDisplay() {
+  if (lockedSeizeHz !== null) {
+    $("sweepLockedLabel").textContent = `Seize Hz locked: ${lockedSeizeHz} Hz (used by Generate & Play)`;
+    $("sweepLockedLabel").style.color = "var(--accent-cyan)";
+    $("sweepClearLock").style.display = "";
+  } else {
+    $("sweepLockedLabel").textContent = "Seize Hz: default (2600 / 2400) — no lock";
+    $("sweepLockedLabel").style.color = "";
+    $("sweepClearLock").style.display = "none";
+  }
+}
+
+function addSweepRow(hz, bins, events) {
+  $("sweepResults").style.display = "";
+  const isWink = events.some(e => e.durMs >= 50 && e.durMs <= 600);
+  const tr = document.createElement("tr");
+  if (isWink) tr.classList.add("sweep-hit");
+  const evText = events.length
+    ? events.map(e => `t=${(e.startMs / 1000).toFixed(2)}s (${e.durMs}ms)`).join(", ")
+    : "—";
+  tr.innerHTML =
+    `<td>${hz}</td>` +
+    `<td class="energy-col">${bins ? energyBar(bins) : "no mic"}</td>` +
+    `<td>${evText}</td>` +
+    `<td>${isWink ? "✓" : "—"}</td>`;
+  $("sweepResultsBody").appendChild(tr);
+}
+
+async function startSweep() {
+  const start  = parseFloat($("sweep_start").value);
+  const end    = parseFloat($("sweep_end").value);
+  const step   = parseFloat($("sweep_step").value);
+  const pauseS = parseFloat($("sweep_delay").value) || 2.0;
+
+  if (!isFinite(start) || !isFinite(end) || !isFinite(step) || step <= 0) {
+    showError("Invalid sweep range — check Start/End/Step values.");
+    return;
+  }
+
+  // Clear previous results
+  $("sweepResultsBody").innerHTML = "";
+  $("sweepResults").style.display = "none";
+  showError("");
+  sweepRunning = true;
+  $("sweepBtn").textContent = "⏹ Stop Sweep";
+
+  const freqs = [];
+  if (start <= end) {
+    for (let f = start; f <= end + 0.001; f += step) freqs.push(Math.round(f));
+  } else {
+    for (let f = start; f >= end - 0.001; f -= step) freqs.push(Math.round(f));
+  }
+
+  const useMic = $("micEnable").checked && micNode != null;
+  const threshold = parseFloat($("micThreshold").value) || 0.02;
+
+  for (let i = 0; i < freqs.length; i++) {
+    if (!sweepRunning) break;
+
+    const hz = freqs[i];
+    sweepCurrentHz = hz;
+    $("sweepStatus").textContent = `Testing: ${hz} Hz  (${i + 1} / ${freqs.length})`;
+
+    kickAudio();
+    const cfg = Object.assign(readConfig(), { seize_freq: hz });
+    let dur = 0;
+    try {
+      dur = playSequenceLive(audioCtx, analyser, $("digits").value, cfg);
+      animateTimeline(dur);
+    } catch (e) { showError(e.message); }
+
+    let bins = null;
+    if (useMic) {
+      // Wait for tone to finish, then record the listen window.
+      await new Promise(r => setTimeout(r, Math.max(0, dur * 1000 + 100)));
+      if (!sweepRunning) break;
+      bins = await recordMicWindow(pauseS);
+    } else {
+      await new Promise(r => setTimeout(r, Math.max(500, (dur + pauseS) * 1000)));
+    }
+
+    if (!sweepRunning) break;
+    const events = detectEvents(bins || [], threshold);
+    addSweepRow(hz, bins, events);
+  }
+
+  stopSweep(sweepRunning);
+}
+
+function stopSweep(finished) {
+  sweepRunning = false;
+  $("sweepBtn").textContent = "▶ Start Sweep";
+  if (finished === true) {
+    $("sweepStatus").textContent =
+      `Done — ${$("sweep_start").value}–${$("sweep_end").value} Hz swept.`;
+  }
+}
+
+function lockSweepHz() {
+  if (sweepCurrentHz == null) { showError("Run a sweep first."); return; }
+  lockedSeizeHz = sweepCurrentHz;
+  stopSweep(false);
+  $("sweepStatus").textContent = `Locked: ${lockedSeizeHz} Hz`;
+  updateLockedDisplay();
+}
+
+function clearSweepLock() {
+  lockedSeizeHz = null;
+  updateLockedDisplay();
+}
+
 // ---- service worker ------------------------------------------------------
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -753,6 +971,17 @@ $("play").onclick = playLocal;
 $("download").onclick = download;
 $("savePreset").onclick = savePreset;
 $("serverPlay").onclick = serverPlay;
+$("sweepBtn").onclick = () => sweepRunning ? stopSweep(false) : startSweep();
+$("sweepLock").onclick = lockSweepHz;
+$("sweepClearLock").onclick = clearSweepLock;
+$("micEnable").addEventListener("change", async () => {
+  if ($("micEnable").checked) {
+    const ok = await enableMic();
+    if (!ok) $("micEnable").checked = false;
+  } else {
+    disableMic();
+  }
+});
 
 for (const id of ["digits", ...TIMING, "seize_only", "coin_scheme"]) {
   const el = $(id);

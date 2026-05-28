@@ -50,6 +50,12 @@
         <label>KP <input id="kp_duration" type="number" step="0.01" value="0.1"></label>
         <label>ST <input id="st_duration" type="number" step="0.01" value="0.1"></label>
         <label>Gap <input id="inter_digit_gap" type="number" step="0.01" value="0.1"></label>
+        <label id="mf_variant_wrap">KP/ST variant
+          <select id="mf_variant">
+            <option value="standard">Standard (KP 1100+1700 / ST 1500+1700)</option>
+            <option value="coin">Coin (KP 1700+2200 / ST 1500+2200)</option>
+          </select>
+        </label>
         <label class="check"><input id="seize_only" type="checkbox"> Seize only</label>
       </fieldset>
       <fieldset><legend>Tone</legend>
@@ -101,6 +107,51 @@
     <div class="actions coin-actions">
       <button id="coinDownload">&#128190; Download WAV</button>
       <span id="coinSelected" class="muted">click a coin to select</span>
+    </div>
+  </section>
+
+  <section class="card" id="sweepCard">
+    <h2>Seize Tone Sweep</h2>
+    <p class="muted">Isolated from normal operation — sweep frequencies never affect Generate &amp; Play unless you lock one.</p>
+
+    <div class="sweep-lock-bar">
+      <span id="sweepLockedLabel" class="muted">Seize Hz: default (2600 / 2400)</span>
+      <button id="sweepClearLock" class="ghost" style="display:none">&#215; Clear lock</button>
+    </div>
+
+    <div class="grid">
+      <fieldset><legend>Frequency Range (Hz)</legend>
+        <label>Start Hz <input id="sweep_start" type="number" step="10" value="1400"></label>
+        <label>End Hz   <input id="sweep_end"   type="number" step="10" value="2700"></label>
+        <label>Step Hz  <input id="sweep_step"  type="number" step="5"  value="25" min="1"></label>
+        <label>Pause after (s) <input id="sweep_delay" type="number" step="0.5" min="0.5" value="2.0"></label>
+        <span class="muted sweep-hint">Known SF: 2600 (R1) · 2400 (E&amp;M/C5) · 2000 (intl) · 1600 (EU) · 1500 (challenge-specific)</span>
+      </fieldset>
+
+      <fieldset><legend>Wink Detection (Mic)</legend>
+        <label class="check"><input id="micEnable" type="checkbox"> Enable mic recording</label>
+        <label>Energy threshold <input id="micThreshold" type="number" step="0.005" min="0.001" value="0.02"></label>
+        <div class="mic-status-row">
+          <span id="micStatus" class="muted">Mic: off</span>
+        </div>
+        <canvas id="micMeter" height="10"></canvas>
+      </fieldset>
+    </div>
+
+    <div class="actions">
+      <button id="sweepBtn" class="primary">&#9654; Start Sweep</button>
+      <button id="sweepLock">Lock Hz</button>
+      <span id="sweepStatus" class="muted">&#8212;</span>
+    </div>
+
+    <div id="sweepResults" style="display:none">
+      <h3 style="font-size:.85rem;color:var(--accent-cyan);margin:14px 0 6px">Results</h3>
+      <div style="overflow-x:auto">
+        <table class="sweep-table">
+          <thead><tr><th>Hz</th><th>Energy</th><th>Events</th><th>Wink</th></tr></thead>
+          <tbody id="sweepResultsBody"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 

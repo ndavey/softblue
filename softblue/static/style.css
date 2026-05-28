@@ -317,6 +317,30 @@ select { width: 100%; margin-top: 4px; padding: 7px;
   background: var(--danger); color: #fff; border-color: var(--danger);
 }
 
+/* ---- seize tone sweep -------------------------------------------------- */
+.sweep-lock-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; margin-bottom: 12px;
+  background: var(--bg-primary); border: 1px solid #2a3866; border-radius: 6px;
+}
+.sweep-hint {
+  grid-column: 1 / -1; font-size: .75rem; line-height: 1.5;
+}
+.mic-status-row { margin: 6px 0 4px; }
+#micMeter { height: 10px; border-radius: 4px; margin-top: 4px; }
+.sweep-table {
+  width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: 4px;
+}
+.sweep-table th, .sweep-table td {
+  padding: 5px 10px; border: 1px solid #2a3866; text-align: left;
+}
+.sweep-table th { color: var(--text-secondary); background: var(--bg-primary); }
+.sweep-table .energy-col {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0; white-space: pre; font-size: .7rem;
+}
+.sweep-table tr.sweep-hit td { color: var(--success); }
+
 @media (max-width: 700px) {
   .card.split, .grid, .coin-panel { grid-template-columns: 1fr; }
 }

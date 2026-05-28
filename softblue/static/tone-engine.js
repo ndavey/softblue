@@ -13,6 +13,8 @@ const MF_DIGITS = {
   "0": [1300, 1500],
 };
 const MF_SPECIAL = { KP: [1100, 1700], ST: [1500, 1700] };
+// Coin/payphone KP and ST variants (used by PhreakMe period-accurate infrastructure)
+const MF_SPECIAL_COIN = { KP: [1700, 2200], ST: [1500, 2200] };
 const SEIZURE_FREQ = 2600;     // MF/R1
 const C5_SF_FREQ   = 2400;     // CCITT #5
 
@@ -90,7 +92,11 @@ function buildSchedule(digits, cfg) {
 
   if (mode === "mf_r1" || mode === "c5") {
     digits = (digits || "").toLowerCase();
-    const sf = mode === "c5" ? C5_SF_FREQ : SEIZURE_FREQ;
+    const defaultSf = mode === "c5" ? C5_SF_FREQ : SEIZURE_FREQ;
+    const sf = (cfg.seize_freq && isFinite(cfg.seize_freq) && cfg.seize_freq > 0)
+               ? cfg.seize_freq : defaultSf;
+    // mf_variant: "coin" uses 1700+2200 KP / 1500+2200 ST (PhreakMe payphone variant)
+    const special = cfg.mf_variant === "coin" ? MF_SPECIAL_COIN : MF_SPECIAL;
     if (cfg.seize_only) {
       if (cfg.seize_duration > 0) push([sf], cfg.seize_duration);
       return { events, total: t };
@@ -104,8 +110,8 @@ function buildSchedule(digits, cfg) {
         if (!first) gap(cfg.inter_digit_gap);
         first = false;
         if (MF_DIGITS[ch])       push(MF_DIGITS[ch], cfg.digit_duration);
-        else if (ch === "k")     push(MF_SPECIAL.KP, cfg.kp_duration);
-        else if (ch === "s")     push(MF_SPECIAL.ST, cfg.st_duration);
+        else if (ch === "k")     push(special.KP, cfg.kp_duration);
+        else if (ch === "s")     push(special.ST, cfg.st_duration);
         else if (ch === "z")     push([sf], cfg.seize_duration);
         else if (ch === "x")     push([sf], CLEAR_S);
         else if (ch === ".")     push([sf], cfg.digit_duration);
@@ -113,14 +119,14 @@ function buildSchedule(digits, cfg) {
     } else {
       if (cfg.seize_duration > 0) push([sf], cfg.seize_duration);
       gap(cfg.wink_delay);
-      if (cfg.kp_duration > 0) push(MF_SPECIAL.KP, cfg.kp_duration);
+      if (cfg.kp_duration > 0) push(special.KP, cfg.kp_duration);
       for (const ch of digits) {
         if (ch === " " || ch === "-") continue;
         gap(cfg.inter_digit_gap);
         push(MF_DIGITS[ch], cfg.digit_duration);
       }
       gap(cfg.inter_digit_gap);
-      if (cfg.st_duration > 0) push(MF_SPECIAL.ST, cfg.st_duration);
+      if (cfg.st_duration > 0) push(special.ST, cfg.st_duration);
     }
   }
 
