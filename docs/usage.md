@@ -44,7 +44,17 @@ softblue preset list | delete <name>
 Digit strings accept `0-9` plus `-` and spaces as visual separators
 (e.g. `555-1234`). Any other character is rejected with a clear message.
 
-## Web API
+## Web app
+
+The browser front-end synthesizes **all** tones client-side with the Web Audio
+API and drives the live spectrum from a shared `AnalyserNode`. It is an
+installable, offline-capable PWA (see the README's *Web app & offline PWA*
+section for deploy + install steps) and does **not** require any of the
+endpoints below — they back the CLI/TUI and optional server-side playback.
+Presets and macros are stored in `localStorage` and synced to the server only
+when one is reachable.
+
+## Web API (optional backend)
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -54,10 +64,9 @@ Digit strings accept `0-9` plus `-` and spaces as visual separators
 | POST | `/api/verify` | per-100ms detected frequencies |
 | GET  | `/api/devices` | output devices |
 | GET/POST/DELETE | `/api/presets[/{name}]` | preset CRUD (name-sanitised) |
+| GET/POST/DELETE | `/api/macros[/{name}]` | macro CRUD |
+| POST | `/api/macros/{name}/play` \| `/render` | play / render a saved macro |
 | WS   | `/ws/audio` | streams int16 LE PCM chunks |
-
-The browser plays audio by decoding the `/api/generate` WAV through a shared
-`AnalyserNode`, which drives the live spectrum display.
 
 ## MF reference
 

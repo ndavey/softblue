@@ -486,10 +486,16 @@ ws.send(JSON.stringify({
 ### 6.5 Browser Features
 
 - **Tone Pad** — Clickable digit buttons (like a phone keypad)
+- **Client-side synthesis** — All tones are generated in-browser via the Web
+  Audio API; the Python backend is optional
+- **Installable PWA** — Service worker caches the app for full offline use; "Add
+  to Home Screen" on iOS/Android runs it fullscreen in airplane mode
 - **Timeline Visualization** — Canvas-based animated timeline showing tone playback progress
 - **Spectrum Analyzer** — Real-time FFT visualization using Web Audio API AnalyserNode
-- **Preset Library** — Save/load/delete presets with localStorage backup
+- **Preset & Macro Library** — Save/load/delete from `localStorage`, synced to
+  the server when one is reachable
 - **WAV Export** — Download generated sequences as WAV files
+- **Themes** — Modern dark UI and a 1972 Blue Box skin (persisted in `localStorage`)
 - **Mobile Responsive** — Works on phones and tablets
 
 ---
