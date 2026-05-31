@@ -946,6 +946,26 @@ function clearSweepLock() {
   updateLockedDisplay();
 }
 
+// ---- theme ---------------------------------------------------------------
+const THEME_KEY = "softblue-theme";
+
+function applyTheme(t) {
+  const root = document.documentElement;
+  if (t === "bluebox") root.setAttribute("data-theme", "bluebox");
+  else root.removeAttribute("data-theme");
+  const btn = $("themeToggle");
+  if (btn) btn.textContent = t === "bluebox" ? "▣ 1972" : "▢ Modern";
+  localStorage.setItem(THEME_KEY, t);
+}
+
+$("themeToggle").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme") === "bluebox"
+    ? "bluebox" : "modern";
+  applyTheme(cur === "bluebox" ? "modern" : "bluebox");
+};
+
+applyTheme(localStorage.getItem(THEME_KEY) || "modern");
+
 // ---- service worker ------------------------------------------------------
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(() => {});

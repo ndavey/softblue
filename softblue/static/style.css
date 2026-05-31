@@ -19,6 +19,14 @@ header {
   border-bottom: 1px solid #1f2a52;
 }
 .logo { color: var(--accent-cyan); font-weight: bold; font-size: 1.1rem; }
+.header-right { display: flex; align-items: center; gap: 10px; }
+.theme-btn {
+  font-family: inherit; font-size: .78rem; cursor: pointer;
+  padding: 4px 10px; border-radius: 10px;
+  background: var(--bg-primary); color: var(--text-secondary);
+  border: 1px solid #2a3866;
+}
+.theme-btn:hover { color: var(--accent-cyan); border-color: var(--accent-cyan); }
 .badge {
   font-size: .8rem; padding: 3px 10px; border-radius: 10px;
   background: #1f2a52; color: var(--text-secondary);
@@ -344,3 +352,202 @@ select { width: 100%; margin-top: 4px; padding: 7px;
 @media (max-width: 700px) {
   .card.split, .grid, .coin-panel { grid-template-columns: 1fr; }
 }
+
+/* ======================================================================== */
+/* Theme: 1970s Blue Box — brushed blue anodized panels, silver pushbuttons, */
+/* a red LED readout, amber legends and a glowing status lamp.               */
+/* ======================================================================== */
+html[data-theme="bluebox"] {
+  --bg-primary: #0a1426;      /* recessed dark insets / displays */
+  --bg-secondary: #16407a;    /* panel base (mostly overridden by gradients) */
+  --accent-cyan: #ffb000;     /* amber LED — replaces cyan everywhere */
+  --accent-magenta: #ff3b30;  /* red */
+  --text-primary: #eef2f7;    /* silkscreen off-white */
+  --text-secondary: #9fb4d4;  /* dim blue-grey labels */
+  --success: #44e08a;
+  --danger: #ff3b30;
+}
+
+/* Anodized blue case with faint vertical brushing. */
+html[data-theme="bluebox"] body {
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.02) 0 2px, rgba(0,0,0,.04) 2px 4px),
+    linear-gradient(160deg, #1b4d8f, #0c2348 60%, #07172e);
+  color: var(--text-primary);
+}
+
+/* Top nameplate. */
+html[data-theme="bluebox"] header {
+  background: linear-gradient(180deg, #2b6fb8, #143a6e);
+  border-bottom: 2px solid #08152b;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 2px 6px rgba(0,0,0,.45);
+}
+html[data-theme="bluebox"] .logo {
+  color: #fff; letter-spacing: .08em; text-shadow: 0 1px 1px rgba(0,0,0,.6);
+}
+
+/* Faceplate panels with bevel + corner screws (the ::after overlay). */
+html[data-theme="bluebox"] .card {
+  position: relative;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.015) 0 2px, rgba(0,0,0,.025) 2px 4px),
+    linear-gradient(180deg, #1d4a86, #143a6e);
+  border: 1px solid #08152b;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.18),
+    inset 0 -2px 5px rgba(0,0,0,.3),
+    0 3px 8px rgba(0,0,0,.45);
+}
+html[data-theme="bluebox"] .card::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 11px 11px, rgba(255,255,255,.5) 0 1px, #243042 1.5px 3px, transparent 3.5px),
+    radial-gradient(circle at calc(100% - 11px) 11px, rgba(255,255,255,.5) 0 1px, #243042 1.5px 3px, transparent 3.5px),
+    radial-gradient(circle at 11px calc(100% - 11px), rgba(255,255,255,.5) 0 1px, #243042 1.5px 3px, transparent 3.5px),
+    radial-gradient(circle at calc(100% - 11px) calc(100% - 11px), rgba(255,255,255,.5) 0 1px, #243042 1.5px 3px, transparent 3.5px);
+}
+html[data-theme="bluebox"] h2,
+html[data-theme="bluebox"] .modal-header h3,
+html[data-theme="bluebox"] .coin-group h3 {
+  color: var(--accent-cyan);
+  text-shadow: 0 0 6px rgba(255,176,0,.45);
+  text-transform: uppercase; letter-spacing: .1em;
+}
+
+/* Theme toggle as a small metal cap. */
+html[data-theme="bluebox"] .theme-btn {
+  background: linear-gradient(180deg, #e8ebee, #b9c0c7);
+  color: #1a2230; border: 1px solid #7a828c;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.85), 0 1px 2px rgba(0,0,0,.4);
+  text-shadow: 0 1px 0 rgba(255,255,255,.5);
+}
+
+/* Status badge as a glowing indicator lamp. */
+html[data-theme="bluebox"] .badge {
+  background: #08152b; color: #9fb4d4; border: 1px solid #08152b;
+}
+html[data-theme="bluebox"] .badge.ok {
+  background: #0c2417; color: #5dffa6; border-color: #1f5a36;
+  box-shadow: 0 0 9px rgba(68,224,138,.6), inset 0 0 5px rgba(68,224,138,.4);
+}
+html[data-theme="bluebox"] .badge.bad {
+  background: #2a0a0a; color: #ff6b60;
+  box-shadow: 0 0 9px rgba(255,59,48,.6), inset 0 0 5px rgba(255,59,48,.4);
+}
+
+/* Red LED readout in a recessed black window. */
+html[data-theme="bluebox"] #digits {
+  background: #07090e; color: #ff3b30;
+  border: 2px solid #05070b; border-radius: 4px;
+  box-shadow: inset 0 2px 7px rgba(0,0,0,.85);
+  text-shadow: 0 0 7px rgba(255,59,48,.75), 0 0 2px rgba(255,120,110,.9);
+  font-weight: 700; letter-spacing: 7px;
+}
+
+/* Recessed dark inputs/selects/text areas on the metal panel. */
+html[data-theme="bluebox"] input[type=text],
+html[data-theme="bluebox"] input:not([type]),
+html[data-theme="bluebox"] input[type=number],
+html[data-theme="bluebox"] select,
+html[data-theme="bluebox"] #macroJson,
+html[data-theme="bluebox"] .sweep-lock-bar,
+html[data-theme="bluebox"] canvas {
+  background: #0a1426; color: var(--text-primary);
+  border: 1px solid #08152b;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,.5);
+}
+html[data-theme="bluebox"] fieldset { border-color: #0a2348; }
+
+/* Silver beveled pushbuttons — keypad + coins. */
+html[data-theme="bluebox"] .keypad button,
+html[data-theme="bluebox"] .coin-btns button {
+  background: linear-gradient(180deg, #e9ecef, #b8bfc6);
+  color: #1a2230; border: 1px solid #7a828c; border-radius: 6px;
+  text-shadow: 0 1px 0 rgba(255,255,255,.55); font-weight: 600;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.9),
+    inset 0 -2px 3px rgba(0,0,0,.25),
+    0 2px 3px rgba(0,0,0,.4);
+}
+html[data-theme="bluebox"] .coin-btns button span { color: #46506a; }
+html[data-theme="bluebox"] .keypad button:hover,
+html[data-theme="bluebox"] .coin-btns button:hover {
+  color: #0a3a7a; border-color: #5a6470;
+}
+html[data-theme="bluebox"] .coin-btns button:hover span { color: #0a3a7a; }
+html[data-theme="bluebox"] .keypad button:active,
+html[data-theme="bluebox"] .coin-btns button:active {
+  background: linear-gradient(180deg, #b8bfc6, #d4d9de);
+  box-shadow: inset 0 2px 5px rgba(0,0,0,.4);
+  transform: translateY(1px);
+}
+html[data-theme="bluebox"] .coin-btns button.selected {
+  background: linear-gradient(180deg, #ffd27a, #e8a32a);
+  color: #2a1a00; border-color: #9a6a10;
+}
+
+/* Amber-capped control keys (KP / ST / idle). */
+html[data-theme="bluebox"] .keypad .kp-control {
+  background: linear-gradient(180deg, #ffd27a, #e8a32a);
+  color: #2a1a00; border-color: #9a6a10;
+}
+html[data-theme="bluebox"] .keypad .kp-control:hover { color: #5a3a00; border-color: #7a5210; }
+
+/* Big red SEIZE button. */
+html[data-theme="bluebox"] .keypad .seize-btn {
+  background: linear-gradient(180deg, #ff5b50, #c41e15);
+  color: #fff; border: 1px solid #7a0d08;
+  text-shadow: 0 1px 2px rgba(0,0,0,.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.4),
+    inset 0 -3px 5px rgba(0,0,0,.35),
+    0 2px 4px rgba(0,0,0,.5);
+}
+html[data-theme="bluebox"] .keypad .seize-btn:hover { color: #fff; border-color: #9a1109; }
+html[data-theme="bluebox"] .keypad .seize-btn:active {
+  transform: translateY(1px); box-shadow: inset 0 2px 6px rgba(0,0,0,.5);
+}
+
+/* Generic metal buttons: actions, modes, card actions, modal footer. */
+html[data-theme="bluebox"] .actions button,
+html[data-theme="bluebox"] #serverPlay,
+html[data-theme="bluebox"] .modes button,
+html[data-theme="bluebox"] .card-actions button,
+html[data-theme="bluebox"] .modal-footer button {
+  background: linear-gradient(180deg, #d7dce1, #aeb6be);
+  color: #1a2230; border: 1px solid #7a828c;
+  text-shadow: 0 1px 0 rgba(255,255,255,.5);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 1px 2px rgba(0,0,0,.4);
+}
+html[data-theme="bluebox"] .actions button:hover,
+html[data-theme="bluebox"] #serverPlay:hover,
+html[data-theme="bluebox"] .modes button:hover,
+html[data-theme="bluebox"] .card-actions button:hover,
+html[data-theme="bluebox"] .modal-footer button:hover {
+  color: #0a3a7a; border-color: #5a6470;
+}
+html[data-theme="bluebox"] .modes button.selected {
+  background: linear-gradient(180deg, #ffd27a, #e8a32a);
+  color: #2a1a00; border-color: #9a6a10; text-shadow: none;
+}
+html[data-theme="bluebox"] .primary {
+  background: linear-gradient(180deg, #ff5b50, #c41e15) !important;
+  color: #fff !important; border: 1px solid #7a0d08 !important;
+}
+
+/* List rows + pinned macro tiles on the panel. */
+html[data-theme="bluebox"] .list li {
+  background: rgba(8,18,36,.55); border-color: #0a2348;
+}
+html[data-theme="bluebox"] .pinned-bar button {
+  background: linear-gradient(180deg, #d7dce1, #aeb6be);
+  color: #1a2230; border-color: #7a828c;
+}
+html[data-theme="bluebox"] .pinned-bar .star { color: var(--danger); }
+
+/* Modal + sweep table surfaces. */
+html[data-theme="bluebox"] .modal-body { background: linear-gradient(180deg, #1d4a86, #143a6e); border-color: #08152b; }
+html[data-theme="bluebox"] .sweep-table th { background: #0a1426; }
+html[data-theme="bluebox"] .sweep-table th,
+html[data-theme="bluebox"] .sweep-table td { border-color: #0a2348; }

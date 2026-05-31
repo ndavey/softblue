@@ -1,4 +1,4 @@
-const CACHE = "softblue-v9";
+const CACHE = "softblue-v11";
 // Relative URLs so the app works whether it's served from a domain root or a
 // subpath (e.g. user.github.io/softblue/). The Cache API stores entries by
 // their resolved absolute URL, so these resolve against the SW's scope.
@@ -10,7 +10,12 @@ const STATIC = [
 ];
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));
+  // cache:"reload" bypasses the browser HTTP cache so a version bump always
+  // pulls fresh assets — otherwise un-versioned files (style.css, sw shell)
+  // can be re-cached stale.
+  e.waitUntil(caches.open(CACHE).then(c =>
+    Promise.all(STATIC.map(u => c.add(new Request(u, { cache: "reload" }))))
+  ));
   self.skipWaiting();
 });
 

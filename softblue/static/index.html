@@ -12,12 +12,17 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="SoftBlue">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=1.0.0-beta.4">
+<!-- Apply saved theme before first paint to avoid a flash. -->
+<script>try{if(localStorage.getItem("softblue-theme")==="bluebox")document.documentElement.setAttribute("data-theme","bluebox");}catch(e){}</script>
 </head>
 <body>
 <header>
   <span class="logo">&#128311; SoftBlue</span>
-  <span id="status" class="badge">connecting&hellip;</span>
+  <div class="header-right">
+    <button id="themeToggle" class="theme-btn" title="Switch theme">&#9634; Modern</button>
+    <span id="status" class="badge">connecting&hellip;</span>
+  </div>
 </header>
 
 <main>
@@ -224,7 +229,7 @@
   </div>
 </div>
 
-<script src="tone-engine.js?v=1.0.0-beta.3"></script>
-<script src="app.js?v=1.0.0-beta.3"></script>
+<script src="tone-engine.js?v=1.0.0-beta.4"></script>
+<script src="app.js?v=1.0.0-beta.4"></script>
 </body>
 </html>
