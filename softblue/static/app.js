@@ -949,12 +949,17 @@ function clearSweepLock() {
 // ---- theme ---------------------------------------------------------------
 const THEME_KEY = "softblue-theme";
 
+// Browser/iOS status-bar tint per theme — keeps the chrome matching the skin.
+const THEME_COLORS = { modern: "#00d4ff", bluebox: "#143a6e" };
+
 function applyTheme(t) {
   const root = document.documentElement;
   if (t === "bluebox") root.setAttribute("data-theme", "bluebox");
   else root.removeAttribute("data-theme");
   const btn = $("themeToggle");
   if (btn) btn.textContent = t === "bluebox" ? "▣ 1972" : "▢ Modern";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", THEME_COLORS[t] || THEME_COLORS.modern);
   localStorage.setItem(THEME_KEY, t);
 }
 

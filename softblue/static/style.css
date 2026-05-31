@@ -15,7 +15,10 @@ body {
 }
 header {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 20px; background: var(--bg-secondary);
+  /* Pad for the iOS notch/status bar (black-translucent) and landscape ears. */
+  padding: calc(14px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
+           14px calc(20px + env(safe-area-inset-left));
+  background: var(--bg-secondary);
   border-bottom: 1px solid #1f2a52;
 }
 .logo { color: var(--accent-cyan); font-weight: bold; font-size: 1.1rem; }
@@ -34,7 +37,10 @@ header {
 .badge.ok { color: var(--bg-primary); background: var(--success); }
 .badge.bad { color: #fff; background: var(--danger); }
 main {
-  max-width: 920px; margin: 0 auto; padding: 20px;
+  max-width: 920px; margin: 0 auto;
+  /* Respect the home indicator and landscape safe areas. */
+  padding: 20px calc(20px + env(safe-area-inset-right))
+           calc(20px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
   display: flex; flex-direction: column; gap: 18px;
 }
 .card {
