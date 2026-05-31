@@ -6,6 +6,12 @@
       "runtimeExecutable": "/Users/ndavey/github/softblue/.venv/bin/python",
       "runtimeArgs": ["-m", "softblue", "web", "--port", "8765"],
       "port": 8765
+    },
+    {
+      "name": "softblue-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8770", "--directory", "softblue/static"],
+      "port": 8770
     }
   ]
 }

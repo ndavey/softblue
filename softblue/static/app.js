@@ -18,6 +18,11 @@ let currentMode = "mf_r1";
 let liveDebounce;
 const LIVE_MS = 300;
 
+// Whether an optional Python backend is reachable. Determined once at startup
+// by probeServer(). When false (the normal case for a static PWA install),
+// localStorage is the source of truth and all server writes are skipped.
+let serverAvailable = false;
+
 // ---- sweep + mic state (isolated from main sequence config) ---------------
 let lockedSeizeHz = null;   // null = engine default; only set via sweep lock
 let micStream = null;
@@ -351,16 +356,17 @@ function renderPresets(presets) {
 }
 
 async function loadPresets() {
-  let presets = [];
-  try {
-    const r = await fetch("/api/presets");
-    if (r.ok) {
-      presets = (await r.json()).presets;
-      localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
-    }
-  } catch {
-    const cached = localStorage.getItem(PRESETS_KEY);
-    if (cached) presets = JSON.parse(cached);
+  // localStorage is the source of truth offline; the server (if present) is an
+  // optional sync that refreshes the local copy.
+  let presets = JSON.parse(localStorage.getItem(PRESETS_KEY) || "[]");
+  if (serverAvailable) {
+    try {
+      const r = await fetch("/api/presets");
+      if (r.ok) {
+        presets = (await r.json()).presets;
+        localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+      }
+    } catch { /* keep local copy */ }
   }
   presetsCache = presets;
   renderPresets(presets);
@@ -375,15 +381,18 @@ async function savePreset() {
   const idx = cached.findIndex(p => p.name === name);
   if (idx >= 0) cached[idx] = preset; else cached.push(preset);
   localStorage.setItem(PRESETS_KEY, JSON.stringify(cached));
-  fetch("/api/presets", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(preset),
-  }).catch(() => {});
+  if (serverAvailable) {
+    fetch("/api/presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(preset),
+    }).catch(() => {});
+  }
   loadPresets();
 }
 
 async function loadDevices() {
+  if (!serverAvailable) return;  // Device card is hidden without a backend.
   try {
     const d = await fetch("/api/devices").then(r => r.json());
     $("devices").textContent =
@@ -529,8 +538,10 @@ async function deleteMacro(m) {
   macros = macros.filter(x => x.name !== m.name);
   cacheMacrosToLocal();
   renderMacros();
-  fetch(`/api/macros/${encodeURIComponent(m.name)}`, { method: "DELETE" })
-    .catch(() => {});
+  if (serverAvailable) {
+    fetch(`/api/macros/${encodeURIComponent(m.name)}`, { method: "DELETE" })
+      .catch(() => {});
+  }
 }
 
 function cacheMacrosToLocal() {
@@ -538,15 +549,15 @@ function cacheMacrosToLocal() {
 }
 
 async function loadMacros() {
-  try {
-    const r = await fetch("/api/macros");
-    if (r.ok) {
-      macros = (await r.json()).macros;
-      cacheMacrosToLocal();
-    }
-  } catch {
-    const cached = localStorage.getItem(MACROS_KEY);
-    if (cached) macros = JSON.parse(cached);
+  macros = JSON.parse(localStorage.getItem(MACROS_KEY) || "[]");
+  if (serverAvailable) {
+    try {
+      const r = await fetch("/api/macros");
+      if (r.ok) {
+        macros = (await r.json()).macros;
+        cacheMacrosToLocal();
+      }
+    } catch { /* keep local copy */ }
   }
   renderMacros();
 }
@@ -555,11 +566,13 @@ async function saveMacro(m, silent) {
   const idx = macros.findIndex(x => x.name === m.name);
   if (idx >= 0) macros[idx] = m; else macros.push(m);
   cacheMacrosToLocal();
-  fetch("/api/macros", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(m),
-  }).catch(() => {});
+  if (serverAvailable) {
+    fetch("/api/macros", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(m),
+    }).catch(() => {});
+  }
   if (!silent) renderMacros();
 }
 
@@ -935,7 +948,7 @@ function clearSweepLock() {
 
 // ---- service worker ------------------------------------------------------
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
 // ---- wiring --------------------------------------------------------------
@@ -992,13 +1005,29 @@ for (const id of ["digits", ...TIMING, "seize_only", "coin_scheme"]) {
 
 renderKeypad();
 
-(async function init() {
+// Probe the optional backend once with a short timeout. Success → server mode
+// (shows audio backend, enables the Device card). Failure → standalone PWA
+// mode, which is fully functional: every tone is synthesized in-browser.
+async function probeServer() {
   try {
-    const h = await fetch("/api/health").then(r => r.json());
-    setStatus("connected · " + h.audio, "ok");
-  } catch {
-    setStatus("offline", "bad");
-  }
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1500);
+    const r = await fetch("/api/health", { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (r.ok) {
+      const h = await r.json();
+      serverAvailable = true;
+      setStatus("connected · " + h.audio, "ok");
+      return;
+    }
+  } catch { /* no backend — that's fine */ }
+  serverAvailable = false;
+  setStatus("ready · offline", "ok");
+  $("deviceCol").style.display = "none";  // server-only features
+}
+
+(async function init() {
+  await probeServer();
   await loadPresets();
   loadMacros();
   loadDevices();
