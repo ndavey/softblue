@@ -52,13 +52,25 @@ backend at all.
 The front-end is a PWA, so you can install it to a home screen and run it in
 airplane mode:
 
-1. Deploy the static folder [`softblue/static/`](softblue/static/) to any HTTPS
-   static host (Cloudflare Pages, Netlify, GitHub Pages). All asset paths are
-   relative, so a sub-path deploy (`user.github.io/softblue/`) works too. No
-   build step — the folder *is* the app.
-2. Open the URL in **Safari** (iOS) or Chrome (Android) → **Add to Home Screen**.
-3. Launch it once while online so the service worker caches everything;
-   afterward it runs fullscreen and offline.
+1. Host the static folder [`softblue/static/`](softblue/static/) over **HTTPS**
+   — this is required, iOS only registers a service worker on a secure origin
+   (a plain `http://` LAN address will *not* cache offline). All asset paths are
+   relative, so a sub-path deploy (`user.github.io/softblue/`) works. No build
+   step — the folder *is* the app.
+   - **GitHub Pages (included):** the
+     [`Deploy PWA to GitHub Pages`](.github/workflows/pages.yml) workflow
+     publishes `softblue/static/` on every push. One-time setup: repo
+     **Settings → Pages → Source: GitHub Actions**. URL:
+     `https://<user>.github.io/<repo>/`.
+   - Or drag the folder onto Netlify Drop / connect Cloudflare Pages.
+2. Open the HTTPS URL in **Safari** (iOS) or Chrome (Android) → **Add to Home Screen**.
+3. **Launch it once from the home screen while online** so the service worker
+   caches everything; afterward it runs fullscreen and offline.
+
+> **iOS note:** WebKit purges a PWA's cache after ~7 days of non-use. Open the
+> app at least once a week to keep it primed for offline launches. For
+> eviction-proof permanent offline, wrap `softblue/static/` in a native shell
+> (e.g. Capacitor) and sideload with an Apple Developer account.
 
 The service worker ([`sw.js`](softblue/static/sw.js)) version-stamps its cache
 and fetches with `cache: "reload"` on install. When you change a static asset,
