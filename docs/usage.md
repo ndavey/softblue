@@ -84,3 +84,29 @@ when one is reachable.
 | 0 | 1300 | 1500 |
 
 All tones stay below the 4 kHz Nyquist limit at the default 8 kHz rate.
+
+## Green box (`-m green_box`)
+
+Operator/TSPS coin-control signals sent by the **called** party over the voice
+path of a connected fortress (payphone) call. Each symbol emits an operator
+release "wink" followed by its control tone:
+
+| Symbol | Function | Control tone | Duration |
+|--------|----------|--------------|----------|
+| `c` | coin collect | 700 + 1100 Hz | ~1 s |
+| `r` | coin return  | 1100 + 1700 Hz | ~1 s |
+| `b` | ringback     | 700 + 1700 Hz | ~2 s |
+
+The wink is selectable with `--green-wink` (CLI) / the **Operator wink**
+selector (web):
+
+- `2600` *(default)* — a 2600 Hz operator-release signal: 90 ms on, 60 ms
+  silence, 900 ms on.
+- `mf8` — an MF "8" (900 + 1500 Hz) 90 ms burst followed by 60 ms silence.
+
+```bash
+softblue generate "crb" -m green_box -o coin-control.wav
+softblue play "r" -m green_box --green-wink mf8
+```
+
+For authorized PhreakMe / ProjectMF lab use only.

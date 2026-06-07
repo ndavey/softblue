@@ -41,7 +41,7 @@ Long and short timing flags are interchangeable everywhere:
 ## Web app & offline PWA
 
 `softblue web` serves the browser UI, but the front-end is **fully client-side**:
-every tone (MF/R1, CCITT #5, DTMF, US/UK red box, coin, 2600 sweep) is
+every tone (MF/R1, CCITT #5, DTMF, US/UK red box, green box, coin, 2600 sweep) is
 synthesized in-browser with the Web Audio API. The Python server is **optional**
 — it only adds server-side audio output and shared preset/macro storage. Presets
 and macros live in `localStorage`, so the app is fully functional with no
