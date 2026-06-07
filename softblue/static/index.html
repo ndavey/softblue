@@ -37,6 +37,7 @@
       <button data-mode="dtmf">DTMF</button>
       <button data-mode="us_redbox">US-Red</button>
       <button data-mode="uk_redbox">UK-Red</button>
+      <button data-mode="bell_3slot">3-Slot</button>
       <button data-mode="pulse_2600">2600-pulse</button>
       <button data-mode="green_box">Green</button>
     </div>
@@ -93,33 +94,6 @@
       <button id="savePreset">Save Preset</button>
     </div>
     <p id="error" class="error"></p>
-  </section>
-
-  <section class="card">
-    <h2>Coin Tones</h2>
-    <div class="coin-panel">
-      <div class="coin-group">
-        <h3>1-Slot <span class="muted">(ACTS · 1700+2200 Hz)</span></h3>
-        <div class="coin-btns">
-          <button data-coin="nickel"  data-slot="1slot">5¢<br><span>1 × 66ms</span></button>
-          <button data-coin="dime"    data-slot="1slot">10¢<br><span>2 × 66ms</span></button>
-          <button data-coin="quarter" data-slot="1slot">25¢<br><span>5 × 33ms</span></button>
-          <button data-coin="dollar"  data-slot="1slot">$1<br><span>1 × 650ms</span></button>
-        </div>
-      </div>
-      <div class="coin-group">
-        <h3>3-Slot <span class="muted">(Operator · bell synthesis)</span></h3>
-        <div class="coin-btns">
-          <button data-coin="nickel"  data-slot="3slot">5¢<br><span>1 ding</span></button>
-          <button data-coin="dime"    data-slot="3slot">10¢<br><span>2 dings</span></button>
-          <button data-coin="quarter" data-slot="3slot">25¢<br><span>gong</span></button>
-        </div>
-      </div>
-    </div>
-    <div class="actions coin-actions">
-      <button id="coinDownload">&#128190; Download WAV</button>
-      <span id="coinSelected" class="muted">click a coin to select</span>
-    </div>
   </section>
 
   <section class="card" id="sweepCard">

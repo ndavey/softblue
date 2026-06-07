@@ -36,6 +36,13 @@ const US_REDBOX_FREQS_PHREAKME = [1700];
 
 const UK_REDBOX = { "1": [1000, 0.200], "2": [1000, 0.350] };
 
+// 3-slot payphone gong/bell tones — [freq, pulses, bellDur, dingGap].
+const BELL_3SLOT = {
+  "1": [1664, 1, 0.35, 0.0],   // nickel — one ding
+  "2": [1664, 2, 0.35, 0.20],  // dime — two dings
+  "3": [800, 1, 0.70, 0.0],    // quarter — gong
+};
+
 // Green box: operator/TSPS coin-control tones — [freq_pair, on_seconds].
 const GREEN_BOX = {
   "c": [[700, 1100], 1.0],    // coin collect
@@ -76,6 +83,7 @@ function _isValid(ch, mode) {
   if (mode === "us_redbox") return US_REDBOX_BURSTS[ch] != null;
   if (mode === "uk_redbox") return UK_REDBOX[ch] != null;
   if (mode === "pulse_2600") return /^[0-9]$/.test(ch);
+  if (mode === "bell_3slot") return BELL_3SLOT[ch] != null;
   if (mode === "green_box") return GREEN_BOX[ch] != null;
   return false;
 }
@@ -83,7 +91,8 @@ function _isValid(ch, mode) {
 function _modeLabel(mode) {
   return {mf_r1:"MF", c5:"C5", dtmf:"DTMF",
           us_redbox:"US red-box", uk_redbox:"UK red-box",
-          pulse_2600:"2600-pulse", green_box:"green-box"}[mode] || mode;
+          pulse_2600:"2600-pulse", bell_3slot:"3-slot bell",
+          green_box:"green-box"}[mode] || mode;
 }
 
 // ---- schedule building --------------------------------------------------
@@ -101,6 +110,11 @@ function buildSchedule(digits, cfg) {
   const push = (freqs, dur) => {
     dur = _safeDur(dur);
     if (dur > 0) { events.push({ freqs, start: t, dur }); t += dur; }
+  };
+  // Bell events carry an exponential-decay envelope (see _scheduleBell).
+  const pushBell = (freq, dur) => {
+    dur = _safeDur(dur);
+    if (dur > 0) { events.push({ freqs: [freq], start: t, dur, bell: true }); t += dur; }
   };
   const gap = (s) => { const n = _safeDur(s); t += n; };
 
@@ -195,6 +209,22 @@ function buildSchedule(digits, cfg) {
     }
   }
 
+  else if (mode === "bell_3slot") {
+    let first = true;
+    for (const ch of digits) {
+      if (ch === " " || ch === "-") continue;
+      if (!first) gap(cfg.inter_digit_gap);
+      first = false;
+      const spec = BELL_3SLOT[ch];
+      if (!spec) continue;
+      const [freq, pulses, bellDur, dingGap] = spec;
+      for (let i = 0; i < pulses; i++) {
+        if (i) gap(dingGap);
+        pushBell(freq, bellDur);
+      }
+    }
+  }
+
   else if (mode === "green_box") {
     digits = (digits || "").toLowerCase();
     const wink = cfg.green_wink === "mf8" ? "mf8" : "2600";
@@ -256,7 +286,8 @@ function playSequenceLive(ctx, dest, digits, cfg) {
   const { events, total } = buildSchedule(digits, cfg);
   const base = ctx.currentTime + 0.05;
   for (const ev of events) {
-    _scheduleEvent(ctx, dest, ev.freqs, base + ev.start, ev.dur, cfg.amplitude);
+    if (ev.bell) _scheduleBell(ctx, dest, ev.freqs[0], base + ev.start, ev.dur, cfg.amplitude);
+    else _scheduleEvent(ctx, dest, ev.freqs, base + ev.start, ev.dur, cfg.amplitude);
   }
   return total;
 }
@@ -284,8 +315,12 @@ function playMacroLive(ctx, dest, steps, baseCfg, presetLookup) {
     validateDigits(digits, cfg.mode);
     const { events, total } = buildSchedule(digits, cfg);
     for (const ev of events) {
-      _scheduleEvent(ctx, dest, ev.freqs,
-                     startBase + t + ev.start, ev.dur, cfg.amplitude);
+      if (ev.bell)
+        _scheduleBell(ctx, dest, ev.freqs[0],
+                      startBase + t + ev.start, ev.dur, cfg.amplitude);
+      else
+        _scheduleEvent(ctx, dest, ev.freqs,
+                       startBase + t + ev.start, ev.dur, cfg.amplitude);
     }
     t += total + (step.delay_after || 0);
   }
@@ -299,29 +334,21 @@ async function renderToWav(digits, cfg) {
   const nFrames = Math.ceil(total * sr) + sr;
   const offline = new OfflineAudioContext(1, nFrames, sr);
   for (const ev of events) {
-    _scheduleEvent(offline, offline.destination, ev.freqs, ev.start, ev.dur, cfg.amplitude);
+    if (ev.bell)
+      _scheduleBell(offline, offline.destination, ev.freqs[0], ev.start, ev.dur, cfg.amplitude);
+    else
+      _scheduleEvent(offline, offline.destination, ev.freqs, ev.start, ev.dur, cfg.amplitude);
   }
   const buffer = await offline.startRendering();
   return _encodeWav(buffer.getChannelData(0), sr);
 }
 
-// ---- Coin tones (1-slot ACTS / PhreakMe and 3-slot bell) ----------------
-
-const COIN_1SLOT = {
-  nickel:  { pulses: 1, on: 0.066, off: 0.066 },
-  dime:    { pulses: 2, on: 0.066, off: 0.066 },
-  quarter: { pulses: 5, on: 0.033, off: 0.033 },
-  dollar:  { pulses: 1, on: 0.650, off: 0     },
-};
-
-// 3-slot mechanical bell tones (synthesized approximation).
-const COIN_3SLOT = {
-  nickel:  { freq: 1664, pulses: 1, bellDur: 0.35, gap: 0 },
-  dime:    { freq: 1664, pulses: 2, bellDur: 0.35, gap: 0.2 },
-  quarter: { freq: 800,  pulses: 1, bellDur: 0.70, gap: 0 },
-};
+// ---- struck-bell envelope (used by the bell_3slot mode) -----------------
 
 function _scheduleBell(ctx, dest, freq, at, dur, amplitude) {
+  dur = _safeDur(dur);
+  amplitude = _safeDur(amplitude, 0.7);
+  if (dur <= 0 || !isFinite(at) || amplitude <= 0) return;
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(amplitude, at + 0.002);
   gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
@@ -332,67 +359,6 @@ function _scheduleBell(ctx, dest, freq, at, dur, amplitude) {
   osc.connect(gain);
   osc.start(at);
   osc.stop(at + dur);
-}
-
-// Play coin tone live. ``scheme`` ("acts"|"phreakme") only applies to 1-slot.
-function playCoinLive(ctx, dest, denomination, slot, amplitude, scheme) {
-  const base = ctx.currentTime + 0.05;
-  amplitude = amplitude || 0.7;
-  if (slot === "1slot") {
-    const spec = COIN_1SLOT[denomination];
-    if (!spec) throw new Error("Unknown denomination: " + denomination);
-    const freqs = scheme === "phreakme" ? US_REDBOX_FREQS_PHREAKME : US_REDBOX_FREQS_ACTS;
-    let t = 0;
-    for (let i = 0; i < spec.pulses; i++) {
-      _scheduleEvent(ctx, dest, freqs, base + t, spec.on, amplitude);
-      t += spec.on + spec.off;
-    }
-    return t;
-  } else {
-    const spec = COIN_3SLOT[denomination];
-    if (!spec) throw new Error("Unknown denomination: " + denomination);
-    let t = 0;
-    for (let i = 0; i < spec.pulses; i++) {
-      _scheduleBell(ctx, dest, spec.freq, base + t, spec.bellDur, amplitude);
-      t += spec.bellDur + spec.gap;
-    }
-    return t;
-  }
-}
-
-async function renderCoinToWav(denomination, slot, amplitude, sampleRate, scheme) {
-  const sr = sampleRate || 8000;
-  amplitude = amplitude || 0.7;
-  const items = [];
-  let total = 0;
-  if (slot === "1slot") {
-    const spec = COIN_1SLOT[denomination];
-    const freqs = scheme === "phreakme" ? US_REDBOX_FREQS_PHREAKME : US_REDBOX_FREQS_ACTS;
-    let t = 0;
-    for (let i = 0; i < spec.pulses; i++) {
-      items.push({ type: "tone", freqs, at: t, dur: spec.on });
-      t += spec.on + spec.off;
-    }
-    total = t;
-  } else {
-    const spec = COIN_3SLOT[denomination];
-    let t = 0;
-    for (let i = 0; i < spec.pulses; i++) {
-      items.push({ type: "bell", freq: spec.freq, at: t, dur: spec.bellDur });
-      t += spec.bellDur + spec.gap;
-    }
-    total = t;
-  }
-  const nFrames = Math.ceil(total * sr) + sr;
-  const offline = new OfflineAudioContext(1, nFrames, sr);
-  for (const it of items) {
-    if (it.type === "tone")
-      _scheduleEvent(offline, offline.destination, it.freqs, it.at, it.dur, amplitude);
-    else
-      _scheduleBell(offline, offline.destination, it.freq, it.at, it.dur, amplitude);
-  }
-  const buffer = await offline.startRendering();
-  return _encodeWav(buffer.getChannelData(0), sr);
 }
 
 function _encodeWav(pcm, sr) {

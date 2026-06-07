@@ -184,6 +184,36 @@ def test_pulse_2600_rejects_non_digit(engine):
         engine.build_sequence("A", Config(mode="pulse_2600"))
 
 
+def test_bell_3slot_frequencies(engine):
+    cfg = Config(mode="bell_3slot", sample_rate=16000)
+    # nickel/dime ding at 1664 Hz, quarter gong at 800 Hz
+    assert dominant_freqs(engine.build_sequence("1", cfg),
+                          cfg.sample_rate, top=1)[0] == 1660
+    assert dominant_freqs(engine.build_sequence("3", cfg),
+                          cfg.sample_rate, top=1)[0] == 800
+
+
+def test_bell_3slot_dime_has_two_dings(engine):
+    cfg = Config(mode="bell_3slot", sample_rate=16000)
+    # dime = 2×0.35s dings + 0.20s gap = 0.90s
+    seq = engine.build_sequence("2", cfg)
+    assert len(seq) == pytest.approx(0.90 * cfg.sample_rate, abs=2)
+
+
+def test_bell_3slot_decays(engine):
+    """Struck-bell envelope: end of the tone is quieter than the start."""
+    cfg = Config(mode="bell_3slot", sample_rate=16000)
+    seq = engine.build_sequence("3", cfg)  # single 0.70s gong
+    head = np.max(np.abs(seq[: len(seq) // 10]))
+    tail = np.max(np.abs(seq[-len(seq) // 10 :]))
+    assert tail < head
+
+
+def test_bell_3slot_rejects_invalid_symbol(engine):
+    with pytest.raises(InvalidDigitError):
+        engine.build_sequence("4", Config(mode="bell_3slot"))
+
+
 def test_green_box_control_tone_frequencies(engine):
     cfg = Config(mode="green_box", green_wink="2600", sample_rate=16000)
     expected = {"c": [700, 1100], "r": [1100, 1700], "b": [700, 1700]}

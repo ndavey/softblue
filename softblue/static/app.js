@@ -95,6 +95,15 @@ const MODE_DEFS = {
       [{act:"clear",label:"C"}, "0", {act:"back",label:"←"}],
     ],
   },
+  bell_3slot: {
+    hint: "3-slot payphone gong/bell tones (caller's coin deposit). " +
+          "1=nickel (1 ding) · 2=dime (2 dings) · 3=quarter (gong).",
+    keys: [
+      [{digit:"1",label:"5¢ 1 ding"}, {digit:"2",label:"10¢ 2 dings"}, {digit:"3",label:"25¢ gong"}],
+      [{act:"clear",label:"C"}, {act:"back",label:"←"}],
+    ],
+    grid: 3,
+  },
   green_box: {
     hint: "Green box: operator coin-control over the voice path. " +
           "c=collect (700+1100) · r=return (1100+1700) · b=ringback (700+1700). " +
@@ -178,7 +187,8 @@ function setMode(mode) {
   // Sensible default content for unfamiliar modes.
   const defaults = {
     mf_r1: "8675309", c5: "8675309", dtmf: "18005551212",
-    us_redbox: "3", uk_redbox: "12", pulse_2600: "0", green_box: "r",
+    us_redbox: "3", uk_redbox: "12", pulse_2600: "0",
+    bell_3slot: "3", green_box: "r",
   };
   $("digits").value = defaults[mode];
 }
@@ -414,55 +424,6 @@ async function loadDevices() {
     $("devices").textContent = "server offline";
   }
 }
-
-// ---- coin tones (standalone card) ---------------------------------------
-
-let selectedCoin = null;
-
-function playCoin(denomination, slot) {
-  kickAudio();
-  try {
-    const scheme = $("coin_scheme").value;
-    const dur = playCoinLive(audioCtx, analyser, denomination, slot,
-                             parseFloat($("amplitude").value), scheme);
-    animateTimeline(dur);
-  } catch (e) {
-    showError(e.message);
-  }
-}
-
-async function downloadCoin() {
-  if (!selectedCoin) { showError("Select a coin first."); return; }
-  showError("");
-  try {
-    const buf = await renderCoinToWav(
-      selectedCoin.denomination, selectedCoin.slot,
-      parseFloat($("amplitude").value),
-      parseInt($("sample_rate").value),
-      $("coin_scheme").value,
-    );
-    const blob = new Blob([buf], { type: "audio/wav" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${selectedCoin.slot}_${selectedCoin.denomination}.wav`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  } catch (e) { showError(e.message); }
-}
-
-document.querySelectorAll(".coin-btns button").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const { coin, slot } = btn.dataset;
-    document.querySelectorAll(".coin-btns button").forEach(b => b.classList.remove("selected"));
-    btn.classList.add("selected");
-    selectedCoin = { denomination: coin, slot };
-    $("coinSelected").textContent = `${slot === "1slot" ? "1-slot" : "3-slot"} · ${coin}`;
-    kickAudio();
-    playCoin(coin, slot);
-  });
-});
-
-$("coinDownload").onclick = downloadCoin;
 
 // ---- macros --------------------------------------------------------------
 

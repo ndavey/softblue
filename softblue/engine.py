@@ -16,6 +16,10 @@ Modes:
 - ``uk_redbox`` — UK trunk pips. ``1``=10p (200ms 1000Hz), ``2``=50p (350ms).
 - ``pulse_2600`` — dial-pulse / "whistle" method. Each digit emits N pulses
   of 2600 Hz (0 = 10 pulses); 60ms break / 40ms make per pulse.
+- ``bell_3slot`` — 3-slot payphone gong/bell tones (Western Electric coin
+  signal, sounded as the caller deposits). ``1``=nickel (one 1664 Hz ding),
+  ``2``=dime (two 1664 Hz dings), ``3``=quarter (one 800 Hz gong). Uses an
+  exponential bell-decay envelope rather than the flat MF/red-box tone.
 - ``green_box`` — operator/TSPS coin-control signals sent by the *called*
   party over the voice path of a connected fortress (payphone) call.
   ``c``=coin collect (700+1100 Hz), ``r``=coin return (1100+1700 Hz),
@@ -37,7 +41,8 @@ from .config import Config
 
 FADE_SECONDS = 0.005  # 5ms raised-cosine edges to suppress clicks
 
-MODES = ("mf_r1", "c5", "dtmf", "us_redbox", "uk_redbox", "pulse_2600", "green_box")
+MODES = ("mf_r1", "c5", "dtmf", "us_redbox", "uk_redbox", "pulse_2600",
+         "bell_3slot", "green_box")
 COIN_SCHEMES = ("acts", "phreakme")
 GREEN_WINKS = ("2600", "mf8")
 
@@ -48,7 +53,8 @@ class InvalidDigitError(ValueError):
     _MODE_LABEL = {
         "mf_r1": "MF", "c5": "C5", "dtmf": "DTMF",
         "us_redbox": "US red-box", "uk_redbox": "UK red-box",
-        "pulse_2600": "2600-pulse", "green_box": "green-box",
+        "pulse_2600": "2600-pulse", "bell_3slot": "3-slot bell",
+        "green_box": "green-box",
     }
 
     def __init__(self, digit: str, mode: str = "mf_r1"):
@@ -108,6 +114,14 @@ class ToneEngine:
     PULSE_2600_BREAK_S = 0.060
     PULSE_2600_MAKE_S = 0.040
 
+    # 3-slot payphone gong/bell tones — ``(freq, pulses, bell_seconds, gap_seconds)``.
+    BELL_3SLOT = {
+        "1": (1664, 1, 0.35, 0.0),   # nickel — one ding
+        "2": (1664, 2, 0.35, 0.20),  # dime — two dings
+        "3": (800, 1, 0.70, 0.0),    # quarter — gong
+    }
+    BELL_FLOOR = 0.0001  # exponential decay target (matches Web Audio bell)
+
     # Green box: operator/TSPS coin-control tones, each ``(freq_pair, on_seconds)``.
     GREEN_BOX = {
         "c": ((700, 1100), 1.0),    # coin collect
@@ -146,6 +160,22 @@ class ToneEngine:
     def generate_silence(self, duration: float, sample_rate: int = 8000) -> np.ndarray:
         return np.zeros(max(0, int(sample_rate * duration)), dtype=np.float32)
 
+    def generate_bell(
+        self,
+        freq: float,
+        duration: float,
+        sample_rate: int = 8000,
+        amplitude: float = 0.7,
+    ) -> np.ndarray:
+        """A struck-bell tone: immediate attack, exponential decay to ~silence."""
+        num_samples = int(sample_rate * duration)
+        if num_samples <= 0 or amplitude <= 0:
+            return np.zeros(max(0, num_samples), dtype=np.float32)
+        t = np.linspace(0, duration, num_samples, endpoint=False)
+        envelope = amplitude * (self.BELL_FLOOR / amplitude) ** (t / duration)
+        samples = np.sin(2 * np.pi * freq * t) * envelope
+        return samples.astype(np.float32)
+
     # ---- validation ----------------------------------------------------------
 
     @classmethod
@@ -175,6 +205,8 @@ class ToneEngine:
             return ch in cls.UK_REDBOX
         if mode == "pulse_2600":
             return ch.isdigit()
+        if mode == "bell_3slot":
+            return ch in cls.BELL_3SLOT
         if mode == "green_box":
             return ch in cls.GREEN_BOX
         return False
@@ -197,6 +229,8 @@ class ToneEngine:
             out = self._build_uk_redbox(cleaned, config)
         elif mode == "pulse_2600":
             out = self._build_pulse_2600(cleaned, config)
+        elif mode == "bell_3slot":
+            out = self._build_bell_3slot(cleaned, config)
         elif mode == "green_box":
             out = self._build_green_box(cleaned, config)
         else:  # pragma: no cover - guarded by validate_digits
@@ -340,6 +374,26 @@ class ToneEngine:
                 parts.append(self.generate_silence(self.PULSE_2600_BREAK_S, sr))
                 parts.append(self.generate_tone(
                     [self.SEIZURE_FREQ], self.PULSE_2600_MAKE_S, sr, amp))
+        return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+    # ---- mode: 3-slot bell ---------------------------------------------------
+
+    def _build_bell_3slot(self, digits: str, config: Config) -> np.ndarray:
+        """3-slot payphone gong/bell tones (exponential-decay envelope)."""
+        sr, amp = config.sample_rate, config.amplitude
+        parts: list[np.ndarray] = []
+        first = True
+        for ch in digits:
+            if ch in (" ", "-"):
+                continue
+            if not first:
+                parts.append(self.generate_silence(config.inter_digit_gap, sr))
+            first = False
+            freq, pulses, bell_s, gap_s = self.BELL_3SLOT[ch]
+            for i in range(pulses):
+                if i:
+                    parts.append(self.generate_silence(gap_s, sr))
+                parts.append(self.generate_bell(freq, bell_s, sr, amp))
         return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
 
     # ---- mode: Green Box -----------------------------------------------------

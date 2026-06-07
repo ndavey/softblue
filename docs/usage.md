@@ -85,6 +85,23 @@ when one is reachable.
 
 All tones stay below the 4 kHz Nyquist limit at the default 8 kHz rate.
 
+## 3-slot bell (`-m bell_3slot`)
+
+Western Electric 3-slot payphone gong/bell tones, sounded as the **caller**
+deposits coins. Each uses a struck-bell (exponential-decay) envelope:
+
+| Symbol | Coin | Tone |
+|--------|------|------|
+| `1` | nickel  | one 1664 Hz ding |
+| `2` | dime    | two 1664 Hz dings |
+| `3` | quarter | one 800 Hz gong |
+
+```bash
+softblue generate "123" -m bell_3slot -o coins.wav
+```
+
+(The single-tone 1-slot ACTS coin tones are produced by `-m us_redbox`.)
+
 ## Green box (`-m green_box`)
 
 Operator/TSPS coin-control signals sent by the **called** party over the voice
