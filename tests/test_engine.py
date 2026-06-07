@@ -184,6 +184,62 @@ def test_pulse_2600_rejects_non_digit(engine):
         engine.build_sequence("A", Config(mode="pulse_2600"))
 
 
+def test_green_box_control_tone_frequencies(engine):
+    cfg = Config(mode="green_box", green_wink="2600", sample_rate=16000)
+    expected = {"c": [700, 1100], "r": [1100, 1700], "b": [700, 1700]}
+    for sym, pair in expected.items():
+        seq = engine.build_sequence(sym, cfg)
+        tail = seq[-int(0.5 * cfg.sample_rate):]  # within the long control tone
+        assert dominant_freqs(tail, cfg.sample_rate) == pair, sym
+
+
+def test_green_box_2600_wink_precedes_control(engine):
+    cfg = Config(mode="green_box", green_wink="2600", sample_rate=16000)
+    seq = engine.build_sequence("c", cfg)
+    head = seq[:int(0.090 * cfg.sample_rate)]  # first wink burst
+    assert dominant_freqs(head, cfg.sample_rate, top=1)[0] == 2600
+    # wink 0.090 + 0.060 + 0.900 = 1.050s, then 1.0s collect control
+    assert len(seq) == pytest.approx(2.050 * cfg.sample_rate, abs=4)
+
+
+def test_green_box_mf8_wink(engine):
+    cfg = Config(mode="green_box", green_wink="mf8", sample_rate=16000)
+    seq = engine.build_sequence("c", cfg)
+    head = seq[:int(0.090 * cfg.sample_rate)]
+    assert dominant_freqs(head, cfg.sample_rate) == [900, 1500]
+    # wink 0.090 + 0.060 = 0.150s, then 1.0s collect control
+    assert len(seq) == pytest.approx(1.150 * cfg.sample_rate, abs=4)
+
+
+def test_green_box_ringback_runs_longer_than_collect(engine):
+    cfg = Config(mode="green_box", green_wink="mf8", sample_rate=16000)
+    assert len(engine.build_sequence("b", cfg)) > len(engine.build_sequence("c", cfg))
+
+
+def test_green_box_multiple_symbols_use_gap(engine):
+    cfg = Config(mode="green_box", green_wink="mf8",
+                 inter_digit_gap=0.1, sample_rate=16000)
+    one = engine.build_sequence("r", cfg)
+    two = engine.build_sequence("rr", cfg)
+    assert len(two) == pytest.approx(2 * len(one) + 0.1 * cfg.sample_rate, abs=4)
+
+
+def test_green_box_symbols_case_insensitive(engine):
+    cfg = Config(mode="green_box", sample_rate=16000)
+    assert np.array_equal(engine.build_sequence("C", cfg),
+                          engine.build_sequence("c", cfg))
+
+
+def test_green_box_rejects_invalid_symbol(engine):
+    with pytest.raises(InvalidDigitError):
+        engine.build_sequence("x", Config(mode="green_box"))
+
+
+def test_invalid_green_wink_raises():
+    with pytest.raises(ValueError, match="green_wink"):
+        Config(green_wink="bogus").validate()
+
+
 def test_invalid_mode_raises():
     with pytest.raises(ValueError, match="mode"):
         Config(mode="foo").validate()
@@ -199,4 +255,5 @@ def test_old_preset_dict_still_loads():
     cfg = Config.from_dict({"seize_duration": 1.5, "amplitude": 0.5})
     assert cfg.mode == "mf_r1"
     assert cfg.coin_scheme == "acts"
+    assert cfg.green_wink == "2600"
     cfg.validate()

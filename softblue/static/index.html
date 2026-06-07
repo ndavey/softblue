@@ -38,6 +38,7 @@
       <button data-mode="us_redbox">US-Red</button>
       <button data-mode="uk_redbox">UK-Red</button>
       <button data-mode="pulse_2600">2600-pulse</button>
+      <button data-mode="green_box">Green</button>
     </div>
     <p class="muted" id="modeHint"></p>
 
@@ -70,6 +71,12 @@
           <select id="coin_scheme">
             <option value="acts">ACTS (1700+2200 Hz, real Bell)</option>
             <option value="phreakme">PhreakMe (1700 Hz only)</option>
+          </select>
+        </label>
+        <label id="greenWinkWrap" style="display:none">Operator wink
+          <select id="green_wink">
+            <option value="2600">2600 Hz (90/60/900 ms release)</option>
+            <option value="mf8">MF "8" (900+1500 Hz, 90/60 ms)</option>
           </select>
         </label>
       </fieldset>

@@ -36,6 +36,18 @@ const US_REDBOX_FREQS_PHREAKME = [1700];
 
 const UK_REDBOX = { "1": [1000, 0.200], "2": [1000, 0.350] };
 
+// Green box: operator/TSPS coin-control tones — [freq_pair, on_seconds].
+const GREEN_BOX = {
+  "c": [[700, 1100], 1.0],    // coin collect
+  "r": [[1100, 1700], 1.0],   // coin return
+  "b": [[700, 1700], 2.0],    // ringback
+};
+const GREEN_WINK_FREQ = 2600;      // 2600 Hz operator-release signal
+const GREEN_WINK_MF8 = [900, 1500]; // MF "8" wink alternative
+const GREEN_WINK_ON1_S = 0.090;    // first burst (both wink styles)
+const GREEN_WINK_GAP_S = 0.060;    // inter-burst silence
+const GREEN_WINK_ON2_S = 0.900;    // second 2600 Hz burst (2600 style only)
+
 const PULSE_BREAK_S = 0.060;
 const PULSE_MAKE_S = 0.040;
 
@@ -46,7 +58,8 @@ const CLEAR_S = 0.100;   // mf inline "x" clear duration
 
 function validateDigits(digits, mode) {
   mode = mode || "mf_r1";
-  if (mode === "mf_r1" || mode === "c5") digits = (digits || "").toLowerCase();
+  if (mode === "mf_r1" || mode === "c5" || mode === "green_box")
+    digits = (digits || "").toLowerCase();
   for (const d of digits) {
     if (d === " " || d === "-") continue;
     if (!_isValid(d, mode)) {
@@ -63,13 +76,14 @@ function _isValid(ch, mode) {
   if (mode === "us_redbox") return US_REDBOX_BURSTS[ch] != null;
   if (mode === "uk_redbox") return UK_REDBOX[ch] != null;
   if (mode === "pulse_2600") return /^[0-9]$/.test(ch);
+  if (mode === "green_box") return GREEN_BOX[ch] != null;
   return false;
 }
 
 function _modeLabel(mode) {
   return {mf_r1:"MF", c5:"C5", dtmf:"DTMF",
           us_redbox:"US red-box", uk_redbox:"UK red-box",
-          pulse_2600:"2600-pulse"}[mode] || mode;
+          pulse_2600:"2600-pulse", green_box:"green-box"}[mode] || mode;
 }
 
 // ---- schedule building --------------------------------------------------
@@ -178,6 +192,29 @@ function buildSchedule(digits, cfg) {
         gap(PULSE_BREAK_S);
         push([SEIZURE_FREQ], PULSE_MAKE_S);
       }
+    }
+  }
+
+  else if (mode === "green_box") {
+    digits = (digits || "").toLowerCase();
+    const wink = cfg.green_wink === "mf8" ? "mf8" : "2600";
+    let first = true;
+    for (const ch of digits) {
+      if (ch === " " || ch === "-") continue;
+      if (!first) gap(cfg.inter_digit_gap);
+      first = false;
+      // Operator release wink.
+      if (wink === "2600") {
+        push([GREEN_WINK_FREQ], GREEN_WINK_ON1_S);
+        gap(GREEN_WINK_GAP_S);
+        push([GREEN_WINK_FREQ], GREEN_WINK_ON2_S);
+      } else {
+        push(GREEN_WINK_MF8, GREEN_WINK_ON1_S);
+        gap(GREEN_WINK_GAP_S);
+      }
+      // Control tone.
+      const spec = GREEN_BOX[ch];
+      if (spec) push(spec[0], spec[1]);
     }
   }
 

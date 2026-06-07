@@ -95,6 +95,16 @@ const MODE_DEFS = {
       [{act:"clear",label:"C"}, "0", {act:"back",label:"←"}],
     ],
   },
+  green_box: {
+    hint: "Green box: operator coin-control over the voice path. " +
+          "c=collect (700+1100) · r=return (1100+1700) · b=ringback (700+1700). " +
+          "Each is preceded by the selected operator-release wink.",
+    keys: [
+      [{digit:"c",label:"COLLECT"}, {digit:"r",label:"RETURN"}, {digit:"b",label:"RINGBACK"}],
+      [{act:"clear",label:"C"}, {act:"back",label:"←"}],
+    ],
+    grid: 3,
+  },
 };
 
 function readConfig() {
@@ -107,6 +117,7 @@ function readConfig() {
   c.seize_only = $("seize_only").checked;
   c.mode = currentMode;
   c.coin_scheme = $("coin_scheme").value;
+  c.green_wink = $("green_wink").value;
   // seize_freq comes only from an explicit sweep lock — never from timing panel
   c.seize_freq = lockedSeizeHz;
   c.mf_variant = $("mf_variant") ? $("mf_variant").value : "standard";
@@ -148,6 +159,7 @@ function renderKeypad() {
   }
   $("modeHint").textContent = def.hint;
   $("coinSchemeWrap").style.display = currentMode === "us_redbox" ? "" : "none";
+  $("greenWinkWrap").style.display = currentMode === "green_box" ? "" : "none";
   // MF-only controls
   const isMF = currentMode === "mf_r1" || currentMode === "c5";
   $("mf_variant_wrap").style.display = isMF ? "" : "none";
@@ -166,7 +178,7 @@ function setMode(mode) {
   // Sensible default content for unfamiliar modes.
   const defaults = {
     mf_r1: "8675309", c5: "8675309", dtmf: "18005551212",
-    us_redbox: "3", uk_redbox: "12", pulse_2600: "0",
+    us_redbox: "3", uk_redbox: "12", pulse_2600: "0", green_box: "r",
   };
   $("digits").value = defaults[mode];
 }
@@ -350,6 +362,7 @@ function renderPresets(presets) {
       for (const k of TIMING) if (p.config && p.config[k] != null) $(k).value = p.config[k];
       $("seize_only").checked = !!(p.config && p.config.seize_only);
       if (p.config && p.config.coin_scheme) $("coin_scheme").value = p.config.coin_scheme;
+      if (p.config && p.config.green_wink) $("green_wink").value = p.config.green_wink;
     };
     ul.appendChild(li);
   }
@@ -601,6 +614,7 @@ function captureStepIfRecording() {
   const cfg = readConfig();
   const step = { mode: cfg.mode, digits: $("digits").value };
   if (cfg.mode === "us_redbox") step.config = { coin_scheme: cfg.coin_scheme };
+  if (cfg.mode === "green_box") step.config = { green_wink: cfg.green_wink };
   recordBuffer.push(step);
 }
 
@@ -1021,7 +1035,7 @@ $("micEnable").addEventListener("change", async () => {
   }
 });
 
-for (const id of ["digits", ...TIMING, "seize_only", "coin_scheme"]) {
+for (const id of ["digits", ...TIMING, "seize_only", "coin_scheme", "green_wink"]) {
   const el = $(id);
   if (el) el.addEventListener("change", playLiveDebounced);
   if (el && el.type !== "checkbox" && el.tagName !== "SELECT")

@@ -16,6 +16,13 @@ Modes:
 - ``uk_redbox`` — UK trunk pips. ``1``=10p (200ms 1000Hz), ``2``=50p (350ms).
 - ``pulse_2600`` — dial-pulse / "whistle" method. Each digit emits N pulses
   of 2600 Hz (0 = 10 pulses); 60ms break / 40ms make per pulse.
+- ``green_box`` — operator/TSPS coin-control signals sent by the *called*
+  party over the voice path of a connected fortress (payphone) call.
+  ``c``=coin collect (700+1100 Hz), ``r``=coin return (1100+1700 Hz),
+  ``b``=ringback (700+1700 Hz). Each control tone is preceded by an operator
+  release "wink", selectable via ``Config.green_wink``: ``2600`` (a 2600 Hz
+  90ms / 60ms-silence / 900ms operator-release signal) or ``mf8`` (an MF "8"
+  900+1500 Hz, 90ms wink + 60ms silence).
 """
 
 from __future__ import annotations
@@ -30,8 +37,9 @@ from .config import Config
 
 FADE_SECONDS = 0.005  # 5ms raised-cosine edges to suppress clicks
 
-MODES = ("mf_r1", "c5", "dtmf", "us_redbox", "uk_redbox", "pulse_2600")
+MODES = ("mf_r1", "c5", "dtmf", "us_redbox", "uk_redbox", "pulse_2600", "green_box")
 COIN_SCHEMES = ("acts", "phreakme")
+GREEN_WINKS = ("2600", "mf8")
 
 
 class InvalidDigitError(ValueError):
@@ -40,7 +48,7 @@ class InvalidDigitError(ValueError):
     _MODE_LABEL = {
         "mf_r1": "MF", "c5": "C5", "dtmf": "DTMF",
         "us_redbox": "US red-box", "uk_redbox": "UK red-box",
-        "pulse_2600": "2600-pulse",
+        "pulse_2600": "2600-pulse", "green_box": "green-box",
     }
 
     def __init__(self, digit: str, mode: str = "mf_r1"):
@@ -100,6 +108,19 @@ class ToneEngine:
     PULSE_2600_BREAK_S = 0.060
     PULSE_2600_MAKE_S = 0.040
 
+    # Green box: operator/TSPS coin-control tones, each ``(freq_pair, on_seconds)``.
+    GREEN_BOX = {
+        "c": ((700, 1100), 1.0),    # coin collect
+        "r": ((1100, 1700), 1.0),   # coin return
+        "b": ((700, 1700), 2.0),    # ringback
+    }
+    # Operator-release "wink" preceding each green-box control tone.
+    GREEN_WINK_FREQ = 2600          # 2600 Hz operator-release signal
+    GREEN_WINK_MF8 = (900, 1500)    # MF "8" wink alternative
+    GREEN_WINK_ON1_S = 0.090        # first burst (both wink styles)
+    GREEN_WINK_GAP_S = 0.060        # inter-burst silence
+    GREEN_WINK_ON2_S = 0.900        # second 2600 Hz burst (2600 style only)
+
     # ---- low-level synthesis -------------------------------------------------
 
     def generate_tone(
@@ -133,7 +154,7 @@ class ToneEngine:
         if mode not in MODES:
             raise InvalidModeError(f"unknown mode {mode!r} (valid: {', '.join(MODES)})")
         cleaned = (digits or "").strip()
-        if mode in ("mf_r1", "c5"):
+        if mode in ("mf_r1", "c5", "green_box"):
             cleaned = cleaned.lower()
         for ch in cleaned:
             if ch in (" ", "-"):
@@ -154,6 +175,8 @@ class ToneEngine:
             return ch in cls.UK_REDBOX
         if mode == "pulse_2600":
             return ch.isdigit()
+        if mode == "green_box":
+            return ch in cls.GREEN_BOX
         return False
 
     # ---- sequence dispatch ---------------------------------------------------
@@ -174,6 +197,8 @@ class ToneEngine:
             out = self._build_uk_redbox(cleaned, config)
         elif mode == "pulse_2600":
             out = self._build_pulse_2600(cleaned, config)
+        elif mode == "green_box":
+            out = self._build_green_box(cleaned, config)
         else:  # pragma: no cover - guarded by validate_digits
             raise InvalidModeError(mode)
         return self._normalize(out)
@@ -315,6 +340,40 @@ class ToneEngine:
                 parts.append(self.generate_silence(self.PULSE_2600_BREAK_S, sr))
                 parts.append(self.generate_tone(
                     [self.SEIZURE_FREQ], self.PULSE_2600_MAKE_S, sr, amp))
+        return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
+
+    # ---- mode: Green Box -----------------------------------------------------
+
+    def _build_green_box(self, digits: str, config: Config) -> np.ndarray:
+        """Operator/TSPS coin-control tones. Each symbol emits an operator
+        release wink followed by its control tone (collect/return/ringback)."""
+        wink = getattr(config, "green_wink", "2600") or "2600"
+        if wink not in GREEN_WINKS:
+            raise InvalidModeError(
+                f"unknown green_wink {wink!r} (valid: {', '.join(GREEN_WINKS)})")
+        sr, amp = config.sample_rate, config.amplitude
+        parts: list[np.ndarray] = []
+        first = True
+        for ch in digits:
+            if ch in (" ", "-"):
+                continue
+            if not first:
+                parts.append(self.generate_silence(config.inter_digit_gap, sr))
+            first = False
+            # Operator release wink.
+            if wink == "2600":
+                parts.append(self.generate_tone(
+                    [self.GREEN_WINK_FREQ], self.GREEN_WINK_ON1_S, sr, amp))
+                parts.append(self.generate_silence(self.GREEN_WINK_GAP_S, sr))
+                parts.append(self.generate_tone(
+                    [self.GREEN_WINK_FREQ], self.GREEN_WINK_ON2_S, sr, amp))
+            else:  # mf8
+                parts.append(self.generate_tone(
+                    list(self.GREEN_WINK_MF8), self.GREEN_WINK_ON1_S, sr, amp))
+                parts.append(self.generate_silence(self.GREEN_WINK_GAP_S, sr))
+            # Control tone.
+            freqs, dur = self.GREEN_BOX[ch]
+            parts.append(self.generate_tone(list(freqs), dur, sr, amp))
         return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
 
     # ---- macros --------------------------------------------------------------
