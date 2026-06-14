@@ -59,12 +59,25 @@ const MODE_DEFS = {
     ],
   },
   dtmf: {
-    hint: "DTMF touch-tone: 0-9 · * · # · A-D.",
+    hint: "DTMF touch-tone: 0-9 · * · # · A-D (AUTOVON precedence column).",
     keys: [
-      ["1","2","3","A"],
-      ["4","5","6","B"],
-      ["7","8","9","C"],
-      ["*","0","#","D"],
+      ["1","2","3",{digit:"A",label:"A\nFlashOvr",cls:"autovon-key"}],
+      ["4","5","6",{digit:"B",label:"B\nFlash",cls:"autovon-key"}],
+      ["7","8","9",{digit:"C",label:"C\nImmed",cls:"autovon-key"}],
+      ["*","0","#",{digit:"D",label:"D\nPrio",cls:"autovon-key"}],
+      [{act:"clear",label:"C",span:2}, {act:"back",label:"←",span:2}],
+    ],
+    grid: 4,
+  },
+  autovon: {
+    hint: "AUTOVON — military 4×4 keypad. Red column = precedence: " +
+          "A=Flash Override (highest, nuclear/presidential) · " +
+          "B=Flash · C=Immediate · D=Priority. Routine calls need no precedence tone.",
+    keys: [
+      ["1","2","3",{digit:"A",label:"A\nFlash Override",cls:"autovon-key autovon-precedence"}],
+      ["4","5","6",{digit:"B",label:"B\nFlash",cls:"autovon-key autovon-precedence"}],
+      ["7","8","9",{digit:"C",label:"C\nImmediate",cls:"autovon-key autovon-precedence"}],
+      ["*","0","#",{digit:"D",label:"D\nPriority",cls:"autovon-key autovon-precedence"}],
       [{act:"clear",label:"C",span:2}, {act:"back",label:"←",span:2}],
     ],
     grid: 4,
@@ -188,7 +201,7 @@ function setMode(mode) {
   const defaults = {
     mf_r1: "8675309", c5: "8675309", dtmf: "18005551212",
     us_redbox: "3", uk_redbox: "12", pulse_2600: "0",
-    bell_3slot: "3", green_box: "r",
+    bell_3slot: "3", green_box: "r", autovon: "a",
   };
   $("digits").value = defaults[mode];
 }

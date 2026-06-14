@@ -42,7 +42,7 @@ from .config import Config
 FADE_SECONDS = 0.005  # 5ms raised-cosine edges to suppress clicks
 
 MODES = ("mf_r1", "c5", "dtmf", "us_redbox", "uk_redbox", "pulse_2600",
-         "bell_3slot", "green_box")
+         "bell_3slot", "green_box", "autovon")
 COIN_SCHEMES = ("acts", "phreakme")
 GREEN_WINKS = ("2600", "mf8")
 
@@ -55,6 +55,7 @@ class InvalidDigitError(ValueError):
         "us_redbox": "US red-box", "uk_redbox": "UK red-box",
         "pulse_2600": "2600-pulse", "bell_3slot": "3-slot bell",
         "green_box": "green-box",
+        "autovon": "AUTOVON",
     }
 
     def __init__(self, digit: str, mode: str = "mf_r1"):
@@ -209,6 +210,8 @@ class ToneEngine:
             return ch in cls.BELL_3SLOT
         if mode == "green_box":
             return ch in cls.GREEN_BOX
+        if mode == "autovon":
+            return ch.upper() in cls.DTMF_DIGITS
         return False
 
     # ---- sequence dispatch ---------------------------------------------------
@@ -233,6 +236,8 @@ class ToneEngine:
             out = self._build_bell_3slot(cleaned, config)
         elif mode == "green_box":
             out = self._build_green_box(cleaned, config)
+        elif mode == "autovon":
+            out = self._build_dtmf(cleaned, config)
         else:  # pragma: no cover - guarded by validate_digits
             raise InvalidModeError(mode)
         return self._normalize(out)

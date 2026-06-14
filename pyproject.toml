@@ -29,8 +29,5 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["softblue"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"softblue/static" = "softblue/static"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -79,7 +79,7 @@ function _isValid(ch, mode) {
   if (mode === "mf_r1" || mode === "c5") {
     return MF_DIGITS[ch] != null || "kszx.".indexOf(ch) >= 0;
   }
-  if (mode === "dtmf")      return DTMF_DIGITS[ch.toUpperCase()] != null;
+  if (mode === "dtmf" || mode === "autovon") return DTMF_DIGITS[ch.toUpperCase()] != null;
   if (mode === "us_redbox") return US_REDBOX_BURSTS[ch] != null;
   if (mode === "uk_redbox") return UK_REDBOX[ch] != null;
   if (mode === "pulse_2600") return /^[0-9]$/.test(ch);
@@ -92,7 +92,7 @@ function _modeLabel(mode) {
   return {mf_r1:"MF", c5:"C5", dtmf:"DTMF",
           us_redbox:"US red-box", uk_redbox:"UK red-box",
           pulse_2600:"2600-pulse", bell_3slot:"3-slot bell",
-          green_box:"green-box"}[mode] || mode;
+          green_box:"green-box", autovon:"AUTOVON"}[mode] || mode;
 }
 
 // ---- schedule building --------------------------------------------------
@@ -158,7 +158,7 @@ function buildSchedule(digits, cfg) {
     }
   }
 
-  else if (mode === "dtmf") {
+  else if (mode === "dtmf" || mode === "autovon") {
     let first = true;
     for (const ch of digits) {
       if (ch === " " || ch === "-") continue;

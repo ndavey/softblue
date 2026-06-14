@@ -152,6 +152,15 @@ select { width: 100%; margin-top: 4px; padding: 7px;
 }
 .keypad .kp-control:hover { color: #ffaa44; border-color: #ffaa44; }
 
+/* AUTOVON precedence column — shared white-space/size for both DTMF and AUTOVON modes */
+.keypad .autovon-key { white-space: pre-line; font-size: 0.72rem; line-height: 1.3; }
+/* Red column styling — only applied in dedicated AUTOVON mode */
+.keypad .autovon-precedence {
+  background: #1a0505; border-color: #aa1111; color: #ff4444;
+}
+.keypad .autovon-precedence:hover { border-color: #ff4444; color: #ff6666; }
+.keypad .autovon-precedence:active { background: #2a0808; }
+
 /* ---- macros: pinned tile bar ------------------------------------------ */
 .pinned-bar {
   display: flex; gap: 8px; flex-wrap: wrap;
