@@ -8,7 +8,15 @@
   --success: #00ff88;
   --danger: #ff0044;
 }
-* { box-sizing: border-box; }
+/* `manipulation` drops the double-tap-to-zoom gesture — which rescales the
+   panel and wrecks its aspect ratio — while still allowing taps, clicks and
+   scrolling. It's set on every element rather than just the root because
+   touch-action doesn't inherit and WebKit has been unreliable about honouring
+   a root-level value for viewport gestures; nothing here uses multi-touch or
+   drag gestures, so there's nothing for it to interfere with. */
+* { box-sizing: border-box; touch-action: manipulation; }
+/* Stops iOS inflating text in landscape, which distorts the panel the same way. */
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace;
   background: var(--bg-primary); color: var(--text-primary);
@@ -341,6 +349,11 @@ select { width: 100%; margin-top: 4px; padding: 7px;
 
 @media (max-width: 700px) {
   .card.split, .grid { grid-template-columns: 1fr; }
+  /* iOS zooms the viewport when focusing a field smaller than 16px — same
+     broken scale as a double tap, just triggered by tapping an input. */
+  input[type=text], input:not([type]), input[type=number], select, textarea {
+    font-size: 16px;
+  }
 }
 
 /* ======================================================================== */

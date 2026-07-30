@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- No zoom: the panel layout is fixed-aspect and a stray double tap while
+     dialing would rescale it. Honoured by Android/Chrome; iOS ignores
+     user-scalable, so see touch-action in style.css + the guards in app.js. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>SoftBlue</title>
 <link rel="icon" href="favicon.ico">
 <link rel="manifest" href="manifest.json">
@@ -12,7 +15,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="SoftBlue">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=1.0.0-beta.5">
+<link rel="stylesheet" href="style.css?v=1.0.0-beta.6">
 <!-- Apply saved theme before first paint to avoid a flash. -->
 <script>try{if(localStorage.getItem("softblue-theme")==="bluebox")document.documentElement.setAttribute("data-theme","bluebox");}catch(e){}</script>
 </head>
@@ -211,7 +214,7 @@
   </div>
 </div>
 
-<script src="tone-engine.js?v=1.0.0-beta.5"></script>
-<script src="app.js?v=1.0.0-beta.5"></script>
+<script src="tone-engine.js?v=1.0.0-beta.6"></script>
+<script src="app.js?v=1.0.0-beta.6"></script>
 </body>
 </html>

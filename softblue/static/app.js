@@ -1016,6 +1016,20 @@ for (const id of ["digits", ...TIMING, "seize_only", "coin_scheme", "green_wink"
     el.addEventListener("input", playLiveDebounced);
 }
 
+/* ---- zoom lockout ------------------------------------------------------- */
+// CSS touch-action kills double-tap zoom, and the viewport meta covers Android,
+// but iOS Safari ignores user-scalable=no — pinch has to be cancelled here.
+// These are the WebKit-only gesture events; preventDefault needs a non-passive
+// listener. Nothing in the UI uses multi-touch, so nothing else is affected.
+for (const ev of ["gesturestart", "gesturechange", "gestureend"])
+  document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+
+// Pinch on browsers without gesture events. Deliberately touchmove and not
+// touchend: cancelling touchend would swallow the click and break fast dialing.
+document.addEventListener("touchmove", (e) => {
+  if (e.touches.length > 1) e.preventDefault();
+}, { passive: false });
+
 renderKeypad();
 
 // Probe the optional backend once with a short timeout. Success → server mode

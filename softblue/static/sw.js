@@ -1,4 +1,4 @@
-const CACHE = "softblue-v13";
+const CACHE = "softblue-v14";
 // Relative URLs so the app works whether it's served from a domain root or a
 // subpath (e.g. user.github.io/softblue/). The Cache API stores entries by
 // their resolved absolute URL, so these resolve against the SW's scope.
