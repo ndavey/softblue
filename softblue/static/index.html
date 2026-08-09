@@ -15,7 +15,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="SoftBlue">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=1.0.0-beta.6">
+<link rel="stylesheet" href="style.css?v=1.0.0-beta.13">
 <!-- Apply saved theme before first paint to avoid a flash. -->
 <script>try{if(localStorage.getItem("softblue-theme")==="bluebox")document.documentElement.setAttribute("data-theme","bluebox");}catch(e){}</script>
 </head>
@@ -39,6 +39,7 @@
       <button data-mode="c5">C5</button>
       <button data-mode="dtmf">DTMF</button>
       <button data-mode="us_redbox">US-Red</button>
+      <button data-mode="phreakme_coin">PhreakMe</button>
       <button data-mode="uk_redbox">UK-Red</button>
       <button data-mode="bell_3slot">3-Slot</button>
       <button data-mode="pulse_2600">2600-pulse</button>
@@ -52,6 +53,74 @@
     </label>
 
     <div class="keypad" id="keypad"></div>
+
+    <fieldset id="redboxWrap" style="display:none">
+      <legend>Coin scheme</legend>
+      <p class="muted">The whole coin table comes from one frequency pair, so if
+        the organisers moved the tones, only that pair moved. Pick a candidate
+        and play it straight into the handset.</p>
+      <label>Candidate
+        <select id="redboxScheme"></select>
+      </label>
+      <p class="muted" id="redboxWhy"></p>
+      <div class="grid" id="redboxCustom" style="display:none">
+        <label>Tone A (Hz)
+          <input id="rbFreqA" type="number" step="100" min="100" value="1700"></label>
+        <label>Tone B (Hz)
+          <input id="rbFreqB" type="number" step="100" min="100" value="2200"></label>
+        <label>Segment (ms)
+          <input id="rbDur" type="number" step="1" min="1" value="60"></label>
+        <label>Gap (ms)
+          <input id="rbGap" type="number" step="1" min="0" value="60"></label>
+        <label>Nickel (dBFS)
+          <input id="rbNickel" type="number" step="1" max="0" value="-6"></label>
+        <label>Dime (dBFS)
+          <input id="rbDime" type="number" step="1" max="0" value="-3"></label>
+      </div>
+
+      <hr class="rb-rule">
+
+      <div class="rb-head">
+        <strong>Sweep</strong>
+        <span class="muted" id="rbSweepProgress">not started</span>
+      </div>
+      <p class="muted">Plays the <b>quarter</b> for each candidate in turn. It
+        exercises both tones and their order in one burst and carries no level
+        semantics, so a miss is unambiguously a frequency miss — nickel and dime
+        differ by 3 dB, which no acoustic path preserves. Hold the phone to the
+        mouthpiece, play, then mark what the far end did.</p>
+      <p class="rb-current" id="rbSweepCurrent">&mdash;</p>
+      <p class="muted" id="rbSweepWhy"></p>
+      <div class="actions">
+        <button id="rbPlay" class="primary">&#9654; Play quarter</button>
+        <button id="rbHit">&#10003; Hit</button>
+        <button id="rbMiss">&#10007; Miss</button>
+        <button id="rbSkip">&#8677; Skip</button>
+        <button id="rbReset" class="ghost">&#8635; Reset</button>
+      </div>
+      <p class="muted" id="rbSweepLog"></p>
+
+      <hr class="rb-rule">
+
+      <div class="rb-head">
+        <strong>Capture a scheme</strong>
+        <span class="muted" id="rbCaptureStatus">mic off</span>
+      </div>
+      <p class="muted">Guessing the pair is inference; recording it is not. If
+        you can capture the real thing &mdash; a handed-out tone generator, or the
+        challenge playing its own collect/return &mdash; one clean capture beats
+        every candidate in the list. Enable the mic in <b>Wink Detection</b>
+        below first.</p>
+      <div class="actions">
+        <button id="rbRecord">&#9679; Record 6s</button>
+        <button id="rbAdopt" disabled>Use as the coin scheme</button>
+      </div>
+      <table id="rbCaptureTable" class="sweep-table" style="display:none">
+        <thead><tr><th>at</th><th>tone</th><th>length</th><th>level</th></tr></thead>
+        <tbody id="rbCaptureBody"></tbody>
+      </table>
+      <p class="muted" id="rbCaptureVerdict"></p>
+    </fieldset>
 
     <div class="grid">
       <fieldset><legend>Timing (s)</legend>
@@ -75,6 +144,7 @@
         <label id="coinSchemeWrap" style="display:none">Coin scheme
           <select id="coin_scheme">
             <option value="acts">ACTS (1700+2200 Hz, real Bell)</option>
+            <option value="nortel">Nortel/Canada (2200 Hz only)</option>
             <option value="phreakme">PhreakMe (1700 Hz only)</option>
           </select>
         </label>
@@ -143,6 +213,48 @@
         </table>
       </div>
     </div>
+  </section>
+
+  <section class="card" id="sipCard">
+    <h2>SIP &mdash; Dial the PBX</h2>
+    <p class="muted" id="sipStatus">checking&hellip;</p>
+    <p class="muted">Tones go straight into the RTP stream, and the far-end audio
+      comes back for analysis. Credentials stay on the server &mdash; they are
+      never sent to this page.</p>
+
+    <div class="grid">
+      <fieldset><legend>Call</legend>
+        <label>Extension <input id="sipExtension" placeholder="5551212" autocomplete="off"></label>
+        <label>Dial string <input id="sipDialString" placeholder="2;212-555-1337;w5[q]" autocomplete="off"></label>
+        <label>Listen (s) <input id="sipListen" type="number" step="0.5" min="0" value="5"></label>
+        <label>Wait before playing (s) <input id="sipWaitBefore" type="number" step="0.5" min="0" value="1"></label>
+        <label class="check"><input id="sipSendTones" type="checkbox" checked>
+          Send the sequence above</label>
+        <label>Red box scheme
+          <select id="sipRedboxScheme"><option value="">(built-in coin table)</option></select>
+        </label>
+        <label class="check"><input id="sipNoRegister" type="checkbox">
+          Skip REGISTER (PBX identifies by IP)</label>
+      </fieldset>
+      <fieldset><legend>Far end</legend>
+        <p class="muted" id="sipResultMeta">&mdash;</p>
+        <p class="muted" id="sipTimeline"></p>
+        <div style="overflow-x:auto">
+          <table class="sweep-table" id="sipResultTable" style="display:none">
+            <thead><tr><th>Time</th><th>Freqs</th><th>Duration</th><th>Level</th></tr></thead>
+            <tbody id="sipResultBody"></tbody>
+          </table>
+        </div>
+        <audio id="sipAudio" controls style="display:none;width:100%;margin-top:8px"></audio>
+      </fieldset>
+    </div>
+
+    <div class="actions">
+      <button id="sipDial" class="primary">&#128222; Dial</button>
+      <button id="sipSaveWav" style="display:none">&#128190; Save far-end WAV</button>
+      <span id="sipBusy" class="muted">&mdash;</span>
+    </div>
+    <p id="sipError" class="error"></p>
   </section>
 
   <section class="card">
@@ -214,7 +326,7 @@
   </div>
 </div>
 
-<script src="tone-engine.js?v=1.0.0-beta.6"></script>
-<script src="app.js?v=1.0.0-beta.6"></script>
+<script src="tone-engine.js?v=1.0.0-beta.13"></script>
+<script src="app.js?v=1.0.0-beta.13"></script>
 </body>
 </html>

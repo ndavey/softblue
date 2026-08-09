@@ -91,6 +91,18 @@ const MODE_DEFS = {
     ],
     grid: 4,
   },
+  phreakme_coin: {
+    hint: "PhreakMe's own coin scheme — NOT Bell ACTS. Nickel and dime are the " +
+          "same tone separated only by level, and the quarter is an A→B " +
+          "sequence. The amplitude control does not apply here — level carries " +
+          "meaning. Pick the frequency pair below.",
+    keys: [
+      [{digit:"n",label:"5¢"}, {digit:"d",label:"10¢"}, {digit:"q",label:"25¢"}, {digit:"$",label:"$1"}],
+      [{digit:"c",label:"collect"}, {digit:"r",label:"return"},
+       {act:"clear",label:"C"}, {act:"back",label:"←"}],
+    ],
+    grid: 4,
+  },
   uk_redbox: {
     hint: "UK trunk pips. 1 = 10p (200ms) · 2 = 50p (350ms).",
     keys: [
@@ -143,6 +155,13 @@ function readConfig() {
   // seize_freq comes only from an explicit sweep lock — never from timing panel
   c.seize_freq = lockedSeizeHz;
   c.mf_variant = $("mf_variant") ? $("mf_variant").value : "standard";
+  // A chosen coin scheme replaces the built-in 1700/2200 table wholesale, for
+  // local Web Audio and for /api/generate alike — otherwise the preview and the
+  // WAV would disagree with what the keypad says it is sending.
+  if (currentMode === "phreakme_coin") {
+    const spec = activeCoinSpec();
+    if (spec) c.coin_spec = spec;
+  }
   return c;
 }
 
@@ -182,6 +201,8 @@ function renderKeypad() {
   $("modeHint").textContent = def.hint;
   $("coinSchemeWrap").style.display = currentMode === "us_redbox" ? "" : "none";
   $("greenWinkWrap").style.display = currentMode === "green_box" ? "" : "none";
+  $("redboxWrap").style.display = currentMode === "phreakme_coin" ? "" : "none";
+  if (currentMode === "phreakme_coin") syncRedbox();
   // MF-only controls
   const isMF = currentMode === "mf_r1" || currentMode === "c5";
   $("mf_variant_wrap").style.display = isMF ? "" : "none";
@@ -200,7 +221,7 @@ function setMode(mode) {
   // Sensible default content for unfamiliar modes.
   const defaults = {
     mf_r1: "8675309", c5: "8675309", dtmf: "18005551212",
-    us_redbox: "3", uk_redbox: "12", pulse_2600: "0",
+    us_redbox: "3", phreakme_coin: "q", uk_redbox: "12", pulse_2600: "0",
     bell_3slot: "3", green_box: "r", autovon: "a",
   };
   $("digits").value = defaults[mode];
@@ -589,6 +610,10 @@ function captureStepIfRecording() {
   const step = { mode: cfg.mode, digits: $("digits").value };
   if (cfg.mode === "us_redbox") step.config = { coin_scheme: cfg.coin_scheme };
   if (cfg.mode === "green_box") step.config = { green_wink: cfg.green_wink };
+  // Without the table, a recorded coin step would replay as last year's 1700/2200
+  // even though the macro was captured while a candidate scheme was selected.
+  if (cfg.mode === "phreakme_coin" && cfg.coin_spec)
+    step.config = { coin_spec: cfg.coin_spec };
   recordBuffer.push(step);
 }
 
@@ -1009,12 +1034,36 @@ $("micEnable").addEventListener("change", async () => {
   }
 });
 
-for (const id of ["digits", ...TIMING, "seize_only", "coin_scheme", "green_wink"]) {
+const REDBOX_INPUTS = ["rbFreqA", "rbFreqB", "rbDur", "rbGap", "rbNickel", "rbDime"];
+
+for (const id of ["digits", ...TIMING, "seize_only", "coin_scheme", "green_wink",
+                  "redboxScheme", ...REDBOX_INPUTS]) {
   const el = $(id);
   if (el) el.addEventListener("change", playLiveDebounced);
   if (el && el.type !== "checkbox" && el.tagName !== "SELECT")
     el.addEventListener("input", playLiveDebounced);
 }
+
+// Selecting a candidate re-labels the hint and reveals the custom fields; the
+// listener above separately re-plays it when Live is on. Picking one by hand
+// also moves the sweep there, so the two never point at different candidates.
+$("redboxScheme").addEventListener("change", () => {
+  syncRedbox();
+  const i = redboxSchemes.findIndex(s => String(s.index) === $("redboxScheme").value);
+  if (i >= 0) { rbSweepIdx = i; rbRender(); rbSaveSweep(); }
+});
+
+$("rbPlay").onclick = rbPlayQuarter;
+$("rbHit").onclick = () => rbMark("hit");
+$("rbMiss").onclick = () => rbMark("miss");
+$("rbSkip").onclick = () => rbMark("skip");
+$("rbReset").onclick = () => {
+  if (!confirm("Discard every verdict and start the sweep over?")) return;
+  rbResults = {};
+  rbGoto(0);
+};
+$("rbRecord").onclick = () => rbRecord(6);
+$("rbAdopt").onclick = rbAdopt;
 
 /* ---- zoom lockout ------------------------------------------------------- */
 // CSS touch-action kills double-tap zoom, and the viewport meta covers Android,
@@ -1053,8 +1102,411 @@ async function probeServer() {
   $("deviceCol").style.display = "none";  // server-only features
 }
 
+
+// ---- SIP ------------------------------------------------------------------
+// The browser has no UDP; /api/sip/call runs the call server-side. Credentials
+// never reach this page — we only ever learn whether they are configured.
+
+let sipWavB64 = null;
+
+function sipErr(msg) { $("sipError").textContent = msg || ""; }
+
+// PhreakMe's coin table is generated from one frequency pair, so a change of
+// frequencies moves only that pair. One ordered candidate list drives both the
+// keypad (local Web Audio, held against the handset) and the SIP card
+// (server-side dial) so the two can never disagree about what scheme N is.
+//
+// The server's list is the ranked analysis and is preferred; the built-in
+// enumeration is the offline fallback, because this page has to work on a phone
+// with no backend reachable.
+let redboxSchemes = [];
+
+async function loadRedboxSchemes() {
+  redboxSchemes = redboxCandidates();
+  if (serverAvailable) {
+    try {
+      const d = await (await fetch("/api/redbox/schemes")).json();
+      if (d.schemes && d.schemes.length) redboxSchemes = d.schemes;
+    } catch { /* keep the offline enumeration */ }
+  }
+
+  const sip = $("sipRedboxScheme");
+  const keypad = $("redboxScheme");
+  for (const s of redboxSchemes) {
+    if (sip) {
+      const o = document.createElement("option");
+      o.value = String(s.index);
+      o.textContent = `${s.index}. ${s.describe}`;
+      sip.appendChild(o);
+    }
+    const o2 = document.createElement("option");
+    o2.value = String(s.index);
+    o2.textContent = `${s.index}. ${s.freq_a}→${s.freq_b} Hz`
+      + `, ${Math.round((s.duration ?? 0.06) * 1000)}ms`
+      + (s.is_control ? "  — last year's table" : "")
+      + (s.confidence ? `  (${s.confidence})` : "");
+    keypad.appendChild(o2);
+  }
+  const custom = document.createElement("option");
+  custom.value = "custom";
+  custom.textContent = "Custom… (enter the pair yourself)";
+  keypad.appendChild(custom);
+
+  // Resume where the sweep left off — a con floor is not a place to remember
+  // which of 45 candidates you had already ruled out.
+  rbLoadSweep();
+  rbGoto(rbSweepIdx);
+}
+
+/** The scheme the keypad is currently set to, as a coin_spec table. */
+function activeCoinSpec() {
+  const sel = $("redboxScheme");
+  if (!sel || !sel.value) return null;
+  if (sel.value === "custom") {
+    const num = (id, fallback) => {
+      const v = parseFloat($(id).value);
+      return isFinite(v) ? v : fallback;
+    };
+    return redboxCoinSpec({
+      freq_a: num("rbFreqA", 1700), freq_b: num("rbFreqB", 2200),
+      duration: num("rbDur", 60) / 1000, gap: num("rbGap", 60) / 1000,
+      nickel_dbfs: num("rbNickel", -6), dime_dbfs: num("rbDime", -3),
+    });
+  }
+  const s = redboxSchemes.find(x => String(x.index) === sel.value);
+  if (!s) return null;
+  // The server ships the rendered table; offline we build it from the pair.
+  return s.coin_spec || redboxCoinSpec(s);
+}
+
+// ---- scheme sweep ---------------------------------------------------------
+//
+// The sweep does not hold its own copy of the candidate — it drives the
+// selector. So whatever the sweep is pointing at is what Play, Download WAV,
+// the SIP card and a recorded macro all use, and there is no way for the thing
+// you are auditioning to differ from the thing you send.
+
+const RB_SWEEP_KEY = "softblue-redbox-sweep";
+let rbSweepIdx = 0;
+let rbResults = {};
+
+function rbLoadSweep() {
+  try {
+    const s = JSON.parse(localStorage.getItem(RB_SWEEP_KEY) || "{}");
+    rbSweepIdx = Number.isInteger(s.idx) ? s.idx : 0;
+    rbResults = s.results && typeof s.results === "object" ? s.results : {};
+  } catch { rbSweepIdx = 0; rbResults = {}; }
+}
+
+function rbSaveSweep() {
+  try {
+    localStorage.setItem(RB_SWEEP_KEY,
+      JSON.stringify({ idx: rbSweepIdx, results: rbResults }));
+  } catch { /* private mode — the sweep still works, it just won't resume */ }
+}
+
+/** Point the sweep (and therefore the whole page) at candidate `i`. */
+function rbGoto(i) {
+  if (!redboxSchemes.length) return;
+  rbSweepIdx = Math.max(0, Math.min(i, redboxSchemes.length - 1));
+  $("redboxScheme").value = String(redboxSchemes[rbSweepIdx].index);
+  syncRedbox();
+  rbRender();
+  rbSaveSweep();
+}
+
+function rbRender() {
+  const s = redboxSchemes[rbSweepIdx];
+  if (!s) return;
+  const tried = Object.keys(rbResults).length;
+  const hits = Object.values(rbResults).filter(v => v === "hit").length;
+  $("rbSweepProgress").textContent =
+    `${rbSweepIdx + 1} of ${redboxSchemes.length} · ${tried} tried · ${hits} hit`;
+
+  const mark = rbResults[s.label];
+  const badge = mark === "hit" ? "  ✓ HIT" : mark === "miss" ? "  ✗ miss"
+              : mark === "skip" ? "  ⏭ skipped" : "";
+  $("rbSweepCurrent").textContent = `${s.index}. ${s.freq_a}→${s.freq_b} Hz`
+    + `, ${Math.round((s.duration ?? 0.06) * 1000)}ms${badge}`;
+  $("rbSweepCurrent").classList.toggle("rb-done", mark === "hit");
+
+  const hitList = Object.entries(rbResults).filter(([, v]) => v === "hit")
+    .map(([k]) => k);
+  $("rbSweepLog").textContent = hitList.length
+    ? `Hits: ${hitList.join(", ")} — select one above and use Download WAV, or `
+      + `copy it into the CLI with: softblue redbox spec -f `
+      + `${redboxSchemes.find(x => x.label === hitList[0])?.freq_a},`
+      + `${redboxSchemes.find(x => x.label === hitList[0])?.freq_b} -o hit.json`
+    : tried ? `${tried} tried, none accepted yet.` : "";
+}
+
+/** Record a verdict and move to the next candidate that has no verdict yet. */
+function rbMark(result) {
+  const s = redboxSchemes[rbSweepIdx];
+  if (!s) return;
+  rbResults[s.label] = result;
+  let next = rbSweepIdx + 1;
+  while (next < redboxSchemes.length && rbResults[redboxSchemes[next].label]) next++;
+  rbGoto(next < redboxSchemes.length ? next : rbSweepIdx);
+}
+
+function rbPlayQuarter() {
+  showError("");
+  kickAudio();
+  try {
+    // Always the quarter — see the panel copy. Deliberately not $("digits"),
+    // which the operator may have left on a nickel from earlier poking.
+    const dur = playSequenceLive(audioCtx, analyser, "q", readConfig());
+    animateTimeline(dur);
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+// ---- blind capture --------------------------------------------------------
+//
+// Records raw PCM off the mic and reads a coin scheme back out of it. Uses a
+// ScriptProcessorNode: deprecated, but it is the one raw-PCM tap that works on
+// every browser this PWA gets installed on, iOS Safari included. An
+// AudioWorklet would need a separate module file, which is one more thing to
+// cache correctly and one more thing to fail at the con.
+
+let rbCaptured = null;
+
+async function rbRecord(seconds = 6) {
+  if (!micNode || !micSource) {
+    $("rbCaptureStatus").textContent = "enable the mic first (Wink Detection)";
+    return;
+  }
+  const btn = $("rbRecord");
+  btn.disabled = true;
+  $("rbAdopt").disabled = true;
+  const sr = audioCtx.sampleRate;
+  const chunks = [];
+  const tap = audioCtx.createScriptProcessor(4096, 1, 1);
+  // A ScriptProcessor only runs while connected to the graph. Route it to a
+  // muted gain rather than the destination, or the mic feeds back through the
+  // speaker — which at a payphone is a howl into the mouthpiece.
+  const sink = audioCtx.createGain();
+  sink.gain.value = 0;
+  tap.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  micSource.connect(tap);
+  tap.connect(sink);
+  sink.connect(audioCtx.destination);
+
+  try {
+    for (let left = seconds; left > 0; left--) {
+      $("rbCaptureStatus").textContent = `● recording — ${left}s`;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  } finally {
+    tap.onaudioprocess = null;
+    try { micSource.disconnect(tap); } catch {}
+    try { tap.disconnect(); sink.disconnect(); } catch {}
+    btn.disabled = false;
+  }
+
+  const total = chunks.reduce((a, c) => a + c.length, 0);
+  const pcm = new Float32Array(total);
+  let off = 0;
+  for (const c of chunks) { pcm.set(c, off); off += c.length; }
+  $("rbCaptureStatus").textContent = `${(total / sr).toFixed(1)}s captured`;
+  rbAnalyseCapture(pcm, sr);
+}
+
+function rbAnalyseCapture(pcm, sr) {
+  const segs = scanCoinSegments(pcm, sr);
+  const body = $("rbCaptureBody");
+  body.innerHTML = "";
+  for (const s of segs) {
+    const tr = document.createElement("tr");
+    // "noise" and "silence" are different findings: a loud run with no tonal
+    // peak means something was there and it wasn't one of the seven.
+    const cells = s.silent
+      ? [`${s.startS.toFixed(3)}s`, s.noise ? "noise (no tonal peak)" : "silence",
+         `${s.durMs.toFixed(0)} ms`, "—"]
+      : [`${s.startS.toFixed(3)}s`, s.freqs.join("+") + " Hz",
+         `${s.durMs.toFixed(0)} ms`, `${s.relDb.toFixed(1)} dB`];
+    for (const c of cells) {
+      const td = document.createElement("td");
+      td.textContent = c;
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+  $("rbCaptureTable").style.display = segs.length ? "" : "none";
+
+  rbCaptured = inferCoinScheme(segs);
+  const v = $("rbCaptureVerdict");
+  if (!rbCaptured) {
+    v.textContent = segs.length
+      ? "No tone at any of the seven detectable frequencies. If the real scheme "
+      + "is outside that set, no sweep here can reach it either."
+      : "Nothing above the noise floor — move closer or raise the source level.";
+    $("rbAdopt").disabled = true;
+    return;
+  }
+  const { freq_a, freq_b, duration, pattern, confident } = rbCaptured;
+  // Levels are relative: an acoustic path has arbitrary gain, so the capture
+  // can pin frequency, order and duration but never absolute dBFS.
+  v.textContent = `Looks like ${pattern}: A=${freq_a} Hz`
+    + (freq_b ? `, B=${freq_b} Hz` : ", B unknown from this pattern")
+    + `, ${Math.round(duration * 1000)} ms segments.`
+    + (confident ? "" : "  Low confidence — capture a quarter or a collect/return "
+                      + "if you can; those pin the scheme unambiguously.")
+    + "  Levels are relative to the loudest burst, so nickel-vs-dime cannot be "
+    + "read off an acoustic capture.";
+  $("rbAdopt").disabled = false;
+}
+
+/** Push a captured scheme into the Custom fields and select it. */
+function rbAdopt() {
+  if (!rbCaptured) return;
+  $("rbFreqA").value = String(rbCaptured.freq_a);
+  if (rbCaptured.freq_b) $("rbFreqB").value = String(rbCaptured.freq_b);
+  $("rbDur").value = String(Math.round(rbCaptured.duration * 1000));
+  $("redboxScheme").value = "custom";
+  syncRedbox();
+  $("rbCaptureVerdict").textContent =
+    "Adopted as the custom scheme — Play, Download WAV and the SIP card now all "
+    + "use it." + (rbCaptured.freq_b ? "" : "  Set Tone B by hand; this pattern "
+                                          + "did not reveal it.");
+}
+
+/** Reflect the selection in the hint line and reveal the custom fields. */
+function syncRedbox() {
+  const sel = $("redboxScheme");
+  if (!sel) return;
+  const isCustom = sel.value === "custom";
+  $("redboxCustom").style.display = isCustom ? "" : "none";
+  if (isCustom) {
+    $("redboxWhy").textContent =
+      "Custom pair — nickel and dime ride tone A at the two levels, the quarter "
+      + "is A then B, the dollar is A and B together.";
+    return;
+  }
+  const s = redboxSchemes.find(x => String(x.index) === sel.value);
+  if (!s) { $("redboxWhy").textContent = ""; return; }
+  $("redboxWhy").textContent = s.rationale
+    ? s.rationale.slice(0, 240) + (s.rationale.length > 240 ? "…" : "")
+    : s.describe || "";
+}
+
+async function probeSip() {
+  if (!serverAvailable) {
+    $("sipStatus").textContent =
+      "Needs the Python backend — SIP cannot run from a static page.";
+    $("sipDial").disabled = true;
+    return;
+  }
+  try {
+    const r = await fetch("/api/sip/status");
+    const d = await r.json();
+    if (d.configured) {
+      const a = d.account;
+      $("sipStatus").textContent =
+        `${a.user}@${a.host}:${a.port}` +
+        (a.register ? " · registers" : " · no REGISTER") +
+        (a.has_password ? "" : " · no password configured");
+      $("sipDial").disabled = false;
+    } else {
+      $("sipStatus").textContent = d.detail || "Not configured.";
+      $("sipDial").disabled = true;
+    }
+  } catch {
+    $("sipStatus").textContent = "Could not reach the server.";
+    $("sipDial").disabled = true;
+  }
+}
+
+function renderSipSegments(segs) {
+  const body = $("sipResultBody");
+  body.innerHTML = "";
+  for (const s of segs) {
+    const tr = document.createElement("tr");
+    const cells = s.silent
+      ? [`${s.start.toFixed(3)}s`, "—", `${s.dur_ms.toFixed(1)} ms`, "silence"]
+      : [`${s.start.toFixed(3)}s`, s.freqs.join("+") + " Hz",
+         `${s.dur_ms.toFixed(1)} ms`, `${s.level_dbfs.toFixed(1)} dBFS`];
+    for (const c of cells) {
+      const td = document.createElement("td");
+      td.textContent = c;
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+  $("sipResultTable").style.display = segs.length ? "" : "none";
+}
+
+$("sipDial").addEventListener("click", async () => {
+  sipErr("");
+  const ext = $("sipExtension").value.trim();
+  if (!ext) { sipErr("Enter an extension to dial."); return; }
+
+  const body = {
+    extension: ext,
+    listen: parseFloat($("sipListen").value) || 0,
+    wait_before: parseFloat($("sipWaitBefore").value) || 0,
+    no_register: $("sipNoRegister").checked,
+  };
+  const dial = $("sipDialString").value.trim();
+  if (dial) body.dial = dial;
+  const scheme = $("sipRedboxScheme") ? $("sipRedboxScheme").value : "";
+  if (scheme) body.redbox_scheme = parseInt(scheme, 10);
+  if ($("sipSendTones").checked) {
+    body.digits = $("digits").value;
+    body.config = readConfig();
+  }
+
+  const btn = $("sipDial");
+  btn.disabled = true;
+  $("sipBusy").textContent = "dialing…";
+  $("sipResultTable").style.display = "none";
+  $("sipAudio").style.display = "none";
+  $("sipSaveWav").style.display = "none";
+  sipWavB64 = null;
+  try {
+    const r = await fetch("/api/sip/call", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+    $("sipResultMeta").textContent =
+      `${d.codec} · ${d.remote} · ${d.duration.toFixed(2)}s received`
+      + (d.scheme ? `  ·  scheme ${d.scheme}` : "");
+    $("sipTimeline").textContent = (d.timeline || [])
+      .map(t => `${t.at.toFixed(2)}s ${t.detail}`).join("  ·  ");
+    renderSipSegments(d.segments || []);
+    if (d.audio) {
+      sipWavB64 = d.audio;
+      $("sipAudio").src = "data:audio/wav;base64," + d.audio;
+      $("sipAudio").style.display = "";
+      $("sipSaveWav").style.display = "";
+    } else {
+      $("sipResultMeta").textContent += " — no far-end audio (check NAT/comedia)";
+    }
+  } catch (e) {
+    sipErr(e.message);
+  } finally {
+    btn.disabled = false;
+    $("sipBusy").textContent = "—";
+  }
+});
+
+$("sipSaveWav").addEventListener("click", () => {
+  if (!sipWavB64) return;
+  const a = document.createElement("a");
+  a.href = "data:audio/wav;base64," + sipWavB64;
+  a.download = `farend-${$("sipExtension").value.trim() || "call"}.wav`;
+  a.click();
+});
+
 (async function init() {
   await probeServer();
+  await probeSip();
+  await loadRedboxSchemes();
   await loadPresets();
   loadMacros();
   loadDevices();

@@ -347,6 +347,26 @@ select { width: 100%; margin-top: 4px; padding: 7px;
 }
 .sweep-table tr.sweep-hit td { color: var(--success); }
 
+/* ---- red box scheme sweep ---- */
+.rb-rule { border: 0; border-top: 1px solid #2a3866; margin: 16px 0 12px; }
+.rb-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; margin-bottom: 6px;
+}
+.rb-head .muted { margin-bottom: 0; }
+/* The candidate under test. Large and monospaced on purpose: it is read at
+   arm's length with a handset in the other hand. */
+.rb-current {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 1rem; color: var(--accent-cyan);
+  padding: 8px 10px; border: 1px solid #2a3866; border-radius: 4px;
+  margin: 0 0 8px; overflow-wrap: anywhere;
+}
+.rb-current.rb-done { color: var(--success); }
+#rbHit { border-color: var(--success) !important; color: var(--success); }
+#rbMiss { border-color: var(--danger) !important; color: var(--danger); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+
 @media (max-width: 700px) {
   .card.split, .grid { grid-template-columns: 1fr; }
   /* iOS zooms the viewport when focusing a field smaller than 16px — same
