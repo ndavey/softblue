@@ -47,8 +47,23 @@ class Config:
     seize_only: bool = False
     # Signaling mode — see engine.MODES.
     mode: str = "mf_r1"
-    # US red-box coin scheme — "acts" (real Bell 1700+2200) or "phreakme" (1700 only).
+    # US red-box coin scheme — see engine.US_REDBOX_FREQS (acts | nortel | phreakme).
     coin_scheme: str = "acts"
+    # Red-box probe overrides. None = use the coin's standard value. These exist so
+    # a black-box target can be swept over frequency/timing without code edits.
+    coin_freqs: list[float] | None = None
+    coin_on: float | None = None
+    coin_gap: float | None = None
+    # Discovered PhreakMe coin patterns, replacing engine.PHREAKME_COINS. Maps a
+    # symbol to a list of ``[freqs | null, seconds, level_dbfs]`` segments — the
+    # shape `softblue analyze` emits, so a changed scheme is playable at once.
+    coin_spec: dict | None = None
+    # MF KP/ST table: "standard" (Bell R1) or "coin" (PhreakMe payphone path,
+    # KP 1700+2200 / ST 1500+2200). The web UI has always sent this; Config
+    # silently dropped it, so a call carried different tones than the preview.
+    mf_variant: str = "standard"
+    # Override the 2600/2400 seize frequency (used by the UI's sweep lock).
+    seize_freq: float | None = None
     # Green-box operator-release wink — "2600" (2600 Hz release signal) or "mf8" (MF "8").
     green_wink: str = "2600"
 
@@ -75,13 +90,19 @@ class Config:
             # All tones (max 2600 Hz) must stay below Nyquist.
             raise ValueError(f"sample_rate must be >= 8000, got {self.sample_rate}")
         # Avoid circular import — engine imports Config.
-        from .engine import COIN_SCHEMES, GREEN_WINKS, MODES
+        from .engine import COIN_SCHEMES, GREEN_WINKS, MF_VARIANTS, MODES
 
         if self.mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}, got {self.mode!r}")
         if self.coin_scheme not in COIN_SCHEMES:
             raise ValueError(
                 f"coin_scheme must be one of {COIN_SCHEMES}, got {self.coin_scheme!r}")
+        if self.mf_variant not in MF_VARIANTS:
+            raise ValueError(
+                f"mf_variant must be one of {MF_VARIANTS}, got {self.mf_variant!r}")
+        if self.seize_freq is not None and not 0 < self.seize_freq < self.sample_rate / 2:
+            raise ValueError(
+                f"seize_freq must be >0 and below Nyquist, got {self.seize_freq}")
         if self.green_wink not in GREEN_WINKS:
             raise ValueError(
                 f"green_wink must be one of {GREEN_WINKS}, got {self.green_wink!r}")
@@ -95,6 +116,18 @@ class Config:
         ):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0")
+        for name in ("coin_on", "coin_gap"):
+            v = getattr(self, name)
+            if v is not None and v < 0:
+                raise ValueError(f"{name} must be >= 0")
+        if self.coin_freqs is not None:
+            if not self.coin_freqs:
+                raise ValueError("coin_freqs must contain at least one frequency")
+            for f in self.coin_freqs:
+                if not 0 < f < self.sample_rate / 2:
+                    raise ValueError(
+                        f"coin_freqs entry {f} must be >0 and below Nyquist "
+                        f"({self.sample_rate / 2:g} Hz)")
 
 
 @dataclass
