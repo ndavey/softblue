@@ -85,6 +85,206 @@ when one is reachable.
 
 All tones stay below the 4 kHz Nyquist limit at the default 8 kHz rate.
 
+## US red box (`-m us_redbox`)
+
+Single-slot ACTS coin tones, sounded toward the CO to signal a deposit.
+`1`=nickel, `2`=dime, `3`=quarter, `4`=dollar.
+
+| Coin | Pulses | On | Gap |
+|------|--------|----|-----|
+| nickel  | 1 | 66 ms | — |
+| dime    | 2 | 66 ms | 66 ms |
+| quarter | 5 | 33 ms | 33 ms |
+
+`4` (dollar) is **non-standard** — real ACTS has no dollar tone, and a target
+asking for a dollar almost certainly wants four quarters.
+
+`--coin-scheme` picks the carrier:
+
+| Scheme | Carrier | Notes |
+|--------|---------|-------|
+| `acts` (default) | 1700 + 2200 Hz | Real Bell ACTS dual tone |
+| `nortel` | 2200 Hz | Canadian / Nortel single tone |
+| `phreakme` | 1700 Hz | Single 1700 Hz |
+
+### Probing an unknown detector
+
+When a target won't respond, `--coin-freqs`, `--coin-on` and `--coin-gap`
+override the table above so a candidate can be replayed without code edits:
+
+```bash
+softblue play 3 -m us_redbox --coin-freqs 2200 --coin-on 0.05 --coin-gap 0.05
+```
+
+`softblue redbox sweep` drives that search automatically — see
+[Sweeping a black-box coin challenge](#sweeping-a-black-box-coin-challenge).
+
+## Red box scheme search (`softblue redbox`)
+
+PhreakMe's coin table is generated from a single frequency pair — 1700 Hz
+carries nickel, dime, collect and return; 2200 Hz is the quarter's second
+symbol and the dollar's partner. Everything else is structure. So when the
+organisers change the frequencies, the structure survives and only the pair
+moves, which turns an open-ended hunt into an ordered sweep over the
+frequencies their own detector can measure.
+
+```bash
+# What to try, and why — the shipped ranking, best-first
+softblue redbox schemes -n 10
+softblue redbox schemes -n 3 --why      # full rationale per candidate
+```
+
+The default list is the ranked analysis shipped in
+`softblue/data/redbox-candidates.json`, followed by every remaining ordered
+pair. `--all-pairs` skips the ranking and enumerates the bare 42; `--ranked
+FILE` supplies your own. Candidate 1 is always last year's exact table, so a
+sweep has a baseline before it calls anything a hit.
+
+Candidates differ on more than frequency — a restored 66 ms segment, an
+inverted nickel/dime split — so each one is named for every axis it moves
+(`1700->2200 66ms`, `1700->2200 n-3/d-6`). That name is the sweep's log key and
+its resume key.
+
+### Trying them
+
+```bash
+# Over SIP — one call per scheme, response compared against a no-coin control
+softblue redbox sweep 2195002600 --dial "w5 2 w2 212-555-1337" -n 8 --log rb.json
+
+# Out the sound device — you judge each one; no PBX needed
+softblue redbox sweep --via audio -n 8 --log rb.json
+
+# Neither: just write WAVs
+softblue redbox export /tmp/schemes -n 10 --symbols ndq$
+```
+
+The mode is inferred from whether you give an EXTENSION; `--via` forces it.
+
+In audio mode, **set the output level once and leave it alone** — level is
+semantic in this scheme (nickel and dime are the same tone 3 dB apart), so
+changing the volume mid-sweep changes which coin you are sending.
+
+### Pinning a scheme once you have it
+
+`redbox spec` renders any pair as a full six-symbol coin table, so a scheme you
+just discovered is playable without a code edit:
+
+```bash
+# From a pair you worked out (e.g. from `softblue analyze` on a recording)
+softblue redbox spec -f 1500,2200 -o hit.json
+
+# Or by index into the candidate list
+softblue redbox spec -s 2 -o hit.json
+
+softblue play q -m phreakme_coin --coin-spec hit.json
+softblue sip call 5551212 --digits q -m phreakme_coin --coin-spec hit.json
+```
+
+### From the web UI
+
+`softblue web` → **PhreakMe** mode shows the same candidate list under **Coin
+scheme**, and plays the selected one straight out of the browser — which is the
+practical rig at the con: phone speaker against the handset mouthpiece. The
+candidates are also built into the page, so the picker still works with the
+backend unreachable. **Custom…** takes an arbitrary A/B pair, segment length and
+nickel/dime levels for anything the list does not cover.
+
+## Sweeping a black-box coin challenge
+
+`softblue sweep` walks an ordered grid of (carrier, on-time, gap) candidates,
+plays each, and records whether it landed. Results are logged to JSON and the
+sweep resumes from that log if interrupted.
+
+```bash
+softblue sweep --coin 3 --log quarter-sweep.json
+```
+
+Useful options:
+
+| Option | Purpose |
+|--------|---------|
+| `--dry-run` | Print the plan without playing anything |
+| `--amplitudes 0.5,0.7,0.9` | Multiply the grid across output levels |
+| `--wet` | Reverb mix of the acoustic model (see below) |
+| `--skip-doomed` | Drop candidates the acoustic path cannot deliver |
+| `--countdown N` | Seconds before each probe, to position a handset |
+
+### The acoustic model
+
+Playing tones from a speaker into a handset mouthpiece is a lossy path: room
+reverb fills the gaps *between* coin pulses, and once a detector can no longer
+see those gaps it reads one long tone instead of a pulse train. `sweep` models
+speaker → room → handset mic and grades each candidate before you waste a call
+on it.
+
+`--wet` is the reverb mix, and it dominates everything else:
+
+| `--wet` | Setup | Gap depth (33 ms quarter) |
+|---------|-------|---------------------------|
+| 0.05 | Speaker pressed to the mouthpiece | −39 dB |
+| 0.15 | Speaker a few cm away | −28 dB |
+| 0.30 | Handset on a desk nearby | −20 dB |
+| 0.45 | Across a small room | −13 dB — marginal |
+| 0.60 | Across a hard-walled room | unresolvable |
+
+A detector needs roughly −12 dB of gap depth to resolve pulses, so **coupling
+tightness matters far more than timing**: at reasonable coupling the canonical
+33 ms quarter is fine, and at loose coupling *no* timing survives. Press the
+speaker against the mouthpiece before you start changing frequencies.
+
+## Calling the PBX directly (`softblue sip`)
+
+Injects tones straight into the RTP stream, and records the far end. This is
+strictly better than playing into a handset: acoustic coupling destroys the two
+things the PhreakMe coin scheme depends on — absolute level (nickel and dime
+differ only by 3 dB) and clean tone edges.
+
+### Credentials
+
+The password is read only from `$SOFTBLUE_SIP_PASSWORD` or `~/.softblue/sip.yaml`
+— never from a flag, which would leak it into shell history and the process
+table.
+
+```yaml
+# ~/.softblue/sip.yaml
+host: pbx.example.lan
+user: softphone
+password: "..."
+register: true
+```
+
+### Dialing
+
+```bash
+softblue sip call 5551212 --digits q -m phreakme_coin --listen 5 --analyze
+```
+
+| Option | Purpose |
+|--------|---------|
+| `--digits` / `-m` | Generate tones and play them into the call |
+| `--play FILE.wav` | Play an existing 8 kHz WAV |
+| `--listen N` | Seconds to hold the call and record |
+| `--record OUT.wav` | Save the far-end audio |
+| `--analyze` | Blind-scan the recording for a coin scheme |
+| `--no-register` | For a PBX that identifies by IP instead |
+
+Everything received is kept, including the challenge's own prompt tones — those
+are usually the most informative thing on the call, and `analyze` timestamps
+each segment so prompt and response stay distinguishable.
+
+### Constraints
+
+Only G.711 µ-law/A-law over UDP, which is exactly what the lab PBX offers
+(`disallow=all` / `allow=ulaw` / `allow=alaw`). That is fortunate rather than
+limiting: G.711 is plain 8-bit companding with no frame model, so a 60 ms coin
+tone passes through intact. Anything transform-based (Opus, GSM, G.729) would
+round the tone edges the detector keys on.
+
+Audio must be generated at 8 kHz (`-r 8000`, the default). The transport refuses
+other rates rather than resampling, since resampling would soften those edges.
+
+No TLS, SRTP, TCP, or re-INVITE handling.
+
 ## 3-slot bell (`-m bell_3slot`)
 
 Western Electric 3-slot payphone gong/bell tones, sounded as the **caller**

@@ -38,6 +38,37 @@ Long and short timing flags are interchangeable everywhere:
 
 `--seize-only` emits just the 2600 Hz trunk-seize tone (no KP/digits/ST).
 
+## Probing an unknown coin detector
+
+`softblue sweep` characterises a red-box challenge that won't respond, walking an
+ordered grid of carrier/timing candidates and logging which one lands:
+
+```bash
+softblue sweep --coin 3 --log quarter-sweep.json
+```
+
+It also models the speaker → room → handset path and grades each candidate, so
+you can tell "wrong tone" apart from "right tone, mangled on the way in" — see
+[docs/usage.md](docs/usage.md#sweeping-a-black-box-coin-challenge).
+
+## When the coin tones move
+
+PhreakMe's whole coin table comes from one frequency pair, so if the organisers
+change the frequencies, only that pair moves. `softblue redbox` enumerates that
+space best-first (ranked analysis, then the remaining ordered pairs), tries
+candidates over SIP or acoustically, and pins whichever one lands:
+
+```bash
+softblue redbox schemes -n 10                 # what to try, and why
+softblue redbox sweep --via audio -n 8        # try them into a handset
+softblue redbox spec -f 1500,2200 -o hit.json # pin the winner
+softblue play q -m phreakme_coin --coin-spec hit.json
+```
+
+The same candidate list is in the web UI under **PhreakMe → Coin scheme**, with
+a **Custom…** entry for a pair the list does not cover — see
+[docs/usage.md](docs/usage.md#red-box-scheme-search-softblue-redbox).
+
 ## Web app & offline PWA
 
 `softblue web` serves the browser UI, but the front-end is **fully client-side**:
