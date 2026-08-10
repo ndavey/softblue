@@ -69,11 +69,6 @@ The same candidate list is in the web UI under **PhreakMe → Coin scheme**, wit
 a **Custom…** entry for a pair the list does not cover — see
 [docs/usage.md](docs/usage.md#red-box-scheme-search-softblue-redbox).
 
-Before running any of it at the next con, read
-[docs/redbox-next-year.md](docs/redbox-next-year.md): what the DC34 server
-actually did with coin tones, the three checks worth doing before spending call
-minutes, and the hypotheses a frequency-pair sweep structurally cannot reach.
-
 ## Web app & offline PWA
 
 `softblue web` serves the browser UI, but the front-end is **fully client-side**:
